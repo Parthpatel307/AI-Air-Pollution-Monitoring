@@ -1,0 +1,2 @@
+Analyze the supplied evidence for visible indicators of air pollution.
+Return observations, confidence, and limitations as structured data.

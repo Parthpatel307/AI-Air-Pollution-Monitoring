@@ -1,0 +1,2 @@
+Explain the forecast in plain language.
+Mention the predicted period, important pollutants, confidence, and practical limitations.
