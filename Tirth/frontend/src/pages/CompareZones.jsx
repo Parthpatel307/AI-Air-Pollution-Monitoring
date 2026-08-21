@@ -1,0 +1,1 @@
+export default function CompareZones() { return <section>Compare zones</section>; }

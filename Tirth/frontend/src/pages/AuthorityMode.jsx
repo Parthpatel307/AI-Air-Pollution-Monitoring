@@ -1,0 +1,1 @@
+export default function AuthorityMode() { return <section>Authority mode</section>; }

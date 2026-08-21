@@ -1,0 +1,1 @@
+export function formatAQI(value) { return value == null ? 'N/A' : String(value); }

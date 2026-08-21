@@ -1,0 +1,1 @@
+export function riskLevel(value) { return value == null ? 'unknown' : 'measured'; }

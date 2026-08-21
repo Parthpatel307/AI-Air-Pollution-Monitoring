@@ -1,0 +1,1 @@
+export function useForecast() { return { data: null, loading: false }; }

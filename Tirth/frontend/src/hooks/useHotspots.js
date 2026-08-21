@@ -1,0 +1,1 @@
+export function useHotspots() { return { data: null, loading: false }; }

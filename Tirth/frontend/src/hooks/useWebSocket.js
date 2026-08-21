@@ -1,0 +1,1 @@
+export function useWebSocket() { return { connected: false }; }

@@ -1,0 +1,1 @@
+export default function CitizenView() { return <section>Citizen view</section>; }

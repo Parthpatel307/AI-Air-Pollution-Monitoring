@@ -1,0 +1,1 @@
+export default function EvidenceAnalysis() { return <section>Evidence analysis</section>; }

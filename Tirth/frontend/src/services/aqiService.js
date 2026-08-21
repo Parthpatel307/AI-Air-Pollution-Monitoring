@@ -1,0 +1,1 @@
+export async function getAQI() { return null; }

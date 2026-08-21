@@ -1,0 +1,1 @@
+export const DEFAULT_COORDINATES = { latitude: 0, longitude: 0 };

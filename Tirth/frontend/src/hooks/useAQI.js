@@ -1,0 +1,1 @@
+export function useAQI() { return { data: null, loading: false }; }
