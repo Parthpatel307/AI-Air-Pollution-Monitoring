@@ -10,7 +10,7 @@ build/
 .coverage
 .DS_Store
 *.log
-data/raw/*
+data/raw/*  
 data/processed/*
 data/external/*
 !.gitkeep
