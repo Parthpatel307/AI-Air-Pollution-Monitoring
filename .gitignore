@@ -8,11 +8,13 @@ Parth/ai-ml/.env
 
 # Vaibhav Secrets
 Vaibhav/backend/.env
+Vaibhav/backend/config/firebase-service-account.json
 Vaibhav/backend/config/firebase-service-account-new.json
 Vaibhav/backend/config/firebase-service-account*.json
 
 # Private Uploads
 Vaibhav/backend/private_uploads/
+private_uploads/
 
 # Python
 __pycache__/
@@ -29,6 +31,23 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+*.log
 
-Parth/ai-ml/source_detection/data/source_data.csv
+# Data folders
+data/raw/*
+data/processed/*
+data/external/*
+!.gitkeep
+
+# Parth generated forecasting artifacts
+Parth/ai-ml/forecasting/data/*.csv
+Parth/ai-ml/forecasting/models/*.joblib
+Parth/ai-ml/forecasting/evaluation/evaluation_report.json
+
+# Parth generated source-detection artifacts
+Parth/ai-ml/source_detection/data/*.csv
 Parth/ai-ml/source_detection/models/
+Parth/ai-ml/source_detection/models/*.joblib
+
+# Parth vision test data
+Parth/ai-ml/vision/test_data/
