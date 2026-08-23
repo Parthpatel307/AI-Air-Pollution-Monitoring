@@ -1,4 +1,5 @@
 fastapi
+firebase-admin
 uvicorn[standard]
 pydantic-settings
 pytest
