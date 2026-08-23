@@ -14,3 +14,7 @@ data/raw/*
 data/processed/*
 data/external/*
 !.gitkeep
+config/firebase-service-account.json
+Vaibhav/backend/config/firebase-service-account.json
+private_uploads/
+Vaibhav/backend/config/firebase-service-account-new.json
