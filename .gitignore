@@ -10,30 +10,21 @@ build/
 .coverage
 .DS_Store
 *.log
-data/raw/*  
+data/raw/*
 data/processed/*
 data/external/*
 !.gitkeep
-.env
-.venv/
-__pycache__/
-.pytest_cache/
-# Python
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
 
-# Secrets
-.env
+# Firebase / backend secrets
+config/firebase-service-account.json
+Vaibhav/backend/config/firebase-service-account.json
+Vaibhav/backend/config/firebase-service-account-new.json
+private_uploads/
 
 # Parth generated ML artifacts
 Parth/ai-ml/forecasting/data/*.csv
 Parth/ai-ml/forecasting/models/*.joblib
 Parth/ai-ml/forecasting/evaluation/evaluation_report.json
-
 Parth/ai-ml/source_detection/data/*.csv
 Parth/ai-ml/source_detection/models/*.joblib
-
-# Local vision test data
 Parth/ai-ml/vision/test_data/
