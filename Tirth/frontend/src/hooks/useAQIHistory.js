@@ -1,25 +1,26 @@
 import { useEffect, useState } from "react";
-import { getHotspots } from "../services/hotspotService";
+import { getAQIHistory } from "../services/aqiService";
 
-export function useHotspots(zoneId) {
-  const [hotspots, setHotspots] = useState([]);
-  const [clusters, setClusters] = useState([]);
+export function useAQIHistory(zoneId, limit = 24) {
+  const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
 
-    async function loadData() {
+    async function loadHistory() {
       setLoading(true);
       setError(null);
 
       try {
-        const hotspotData = await getHotspots(zoneId);
+        const result = await getAQIHistory({
+          zoneId,
+          limit,
+        });
 
         if (!cancelled) {
-          setHotspots(hotspotData || []);
-          setClusters([]);
+          setData(result);
         }
       } catch (err) {
         if (!cancelled) {
@@ -32,16 +33,15 @@ export function useHotspots(zoneId) {
       }
     }
 
-    loadData();
+    loadHistory();
 
     return () => {
       cancelled = true;
     };
-  }, [zoneId]);
+  }, [zoneId, limit]);
 
   return {
-    hotspots,
-    clusters,
+    data,
     loading,
     error,
   };

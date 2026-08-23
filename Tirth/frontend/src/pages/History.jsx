@@ -14,45 +14,117 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
+import { useAQIHistory } from "../hooks/useAQIHistory";
+import { useAppContext } from "../context/AppContext";
+
 function History() {
+  const { selectedZone } = useAppContext();
   const [range, setRange] = useState("TODAY");
 
-  const readings = [
-    { time: "08:00", aqi: 108, pm25: 55.4, pm10: 91.2 },
-    { time: "09:00", aqi: 118, pm25: 61.2, pm10: 98.4 },
-    { time: "10:00", aqi: 126, pm25: 66.5, pm10: 105.2 },
-    { time: "11:00", aqi: 138, pm25: 74.2, pm10: 118.5 },
-    { time: "12:00", aqi: 142, pm25: 78.4, pm10: 121.2 },
-    { time: "13:00", aqi: 148, pm25: 82.1, pm10: 129.4 },
-    { time: "14:00", aqi: 153, pm25: 85.8, pm10: 134.1 },
-    { time: "15:00", aqi: 147, pm25: 80.1, pm10: 128.4 },
-  ];
+  const limit =
+    range === "TODAY"
+      ? 24
+      : range === "7D"
+      ? 168
+      : 168;
 
-  const averageAQI = useMemo(
-    () =>
-      Math.round(
-        readings.reduce((sum, item) => sum + item.aqi, 0) /
-          readings.length
-      ),
-    []
-  );
+  const {
+    data,
+    loading,
+    error,
+  } = useAQIHistory(selectedZone, limit);
 
-  const peakAQI = Math.max(...readings.map((item) => item.aqi));
+  const readings = useMemo(() => {
+    const rawReadings = data?.readings || [];
+
+    return [...rawReadings]
+      .reverse()
+      .map((reading) => ({
+        time: new Date(
+          reading.timestamp
+        ).toLocaleString([], {
+          month: "short",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+        }),
+        aqi: reading.aqi ?? 0,
+        pm25: reading.pm25 ?? 0,
+        pm10: reading.pm10 ?? 0,
+      }));
+  }, [data]);
+
+  const averageAQI =
+    readings.length > 0
+      ? Math.round(
+          readings.reduce(
+            (sum, item) => sum + item.aqi,
+            0
+          ) / readings.length
+        )
+      : 0;
+
+  const peakAQI =
+    readings.length > 0
+      ? Math.max(
+          ...readings.map((item) => item.aqi)
+        )
+      : 0;
+
+  const pm25Peak =
+    readings.length > 0
+      ? Math.max(
+          ...readings.map((item) => item.pm25)
+        )
+      : 0;
+
+  const trend =
+    readings.length >= 2
+      ? Math.round(
+          ((readings[readings.length - 1].aqi -
+            readings[0].aqi) /
+            Math.max(readings[0].aqi, 1)) *
+            100
+        )
+      : 0;
+
+  if (loading) {
+    return (
+      <div>
+        <p>Loading AQI history...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <p>
+          History unavailable: {error}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="dashboard-header history-v3-header">
         <div>
-          <p className="eyebrow">HISTORICAL ENVIRONMENT DATA</p>
+          <p className="eyebrow">
+            HISTORICAL ENVIRONMENT DATA
+          </p>
 
           <h1>
             AQI
-            <span className="dashboard-title-accent"> History</span>
+            <span className="dashboard-title-accent">
+              {" "}History
+            </span>
           </h1>
 
           <p>
-            Analyze pollution trends over time and identify periods of
-            elevated environmental risk.
+            Analyze pollution trends over time and
+            identify periods of elevated
+            environmental risk.
           </p>
         </div>
 
@@ -61,11 +133,21 @@ function History() {
 
           <select
             value={range}
-            onChange={(event) => setRange(event.target.value)}
+            onChange={(event) =>
+              setRange(event.target.value)
+            }
           >
-            <option value="TODAY">Today</option>
-            <option value="7D">Last 7 Days</option>
-            <option value="30D">Last 30 Days</option>
+            <option value="TODAY">
+              Today
+            </option>
+
+            <option value="7D">
+              Last 7 Days
+            </option>
+
+            <option value="30D">
+              Last 30 Days
+            </option>
           </select>
         </div>
       </div>
@@ -85,9 +167,11 @@ function History() {
 
         <section className="card history-summary-card">
           <span>PM2.5 Peak</span>
+
           <strong>
-            {Math.max(...readings.map((item) => item.pm25))}
+            {pm25Peak}
           </strong>
+
           <small>µg/m³</small>
         </section>
 
@@ -96,17 +180,23 @@ function History() {
 
           <strong className="history-trend">
             <TrendingUp size={20} />
-            +12%
+            {trend >= 0 ? "+" : ""}
+            {trend}%
           </strong>
 
-          <small>vs previous period</small>
+          <small>
+            First vs latest reading
+          </small>
         </section>
       </div>
 
       <section className="card history-area-card">
         <div className="card-header">
           <div>
-            <span className="card-kicker">TIME SERIES</span>
+            <span className="card-kicker">
+              TIME SERIES
+            </span>
+
             <h2>AQI Trend</h2>
           </div>
 
@@ -116,7 +206,10 @@ function History() {
         </div>
 
         <div className="history-area-wrap">
-          <ResponsiveContainer width="100%" height={360}>
+          <ResponsiveContainer
+            width="100%"
+            height={360}
+          >
             <AreaChart data={readings}>
               <defs>
                 <linearGradient
@@ -167,7 +260,8 @@ function History() {
               <Tooltip
                 contentStyle={{
                   background: "#0d1c1a",
-                  border: "1px solid rgba(212,241,232,0.08)",
+                  border:
+                    "1px solid rgba(212,241,232,0.08)",
                   borderRadius: "12px",
                   color: "#ecf5f1",
                 }}
@@ -192,8 +286,13 @@ function History() {
       <section className="card history-table-card">
         <div className="card-header">
           <div>
-            <span className="card-kicker">MEASUREMENTS</span>
-            <h2>Historical Readings</h2>
+            <span className="card-kicker">
+              MEASUREMENTS
+            </span>
+
+            <h2>
+              Historical Readings
+            </h2>
           </div>
         </div>
 
@@ -209,14 +308,16 @@ function History() {
             </thead>
 
             <tbody>
-              {readings.map((reading) => (
-                <tr key={reading.time}>
-                  <td>{reading.time}</td>
-                  <td>{reading.aqi}</td>
-                  <td>{reading.pm25}</td>
-                  <td>{reading.pm10}</td>
-                </tr>
-              ))}
+              {readings.map(
+                (reading, index) => (
+                  <tr key={`${reading.time}-${index}`}>
+                    <td>{reading.time}</td>
+                    <td>{reading.aqi}</td>
+                    <td>{reading.pm25}</td>
+                    <td>{reading.pm10}</td>
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
         </div>

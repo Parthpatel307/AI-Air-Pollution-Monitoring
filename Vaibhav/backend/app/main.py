@@ -1,4 +1,13 @@
+from pathlib import Path
+
+from dotenv import load_dotenv
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+# Explicitly load Vaibhav/backend/.env
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
+ENV_PATH = BACKEND_ROOT / ".env"
+load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 from app.routers.ai import router as ai_router
 from app.routers.aqi import router as aqi_router
@@ -13,9 +22,21 @@ from app.routers.reports import router as reports_router
 from app.routers.zones import router as zones_router
 from app.websocket.aqi_socket import router as ws_router
 
+
 app = FastAPI(
     title="AI Air Pollution Monitoring API",
     version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 

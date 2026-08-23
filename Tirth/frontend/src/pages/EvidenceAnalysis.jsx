@@ -7,26 +7,71 @@ import {
   Target,
 } from "lucide-react";
 
+import { analyzeEvidence } from "../services/aiService";
+
 function EvidenceAnalysis() {
   const [evidenceId, setEvidenceId] = useState("");
   const [result, setResult] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
-  function handleAnalyze(event) {
+  async function handleAnalyze(event) {
     event.preventDefault();
 
-    if (!evidenceId.trim()) {
-      alert("Please enter an Evidence ID.");
+    const cleanEvidenceId = evidenceId.trim();
+
+    if (!cleanEvidenceId || loading) {
       return;
     }
 
-    setResult({
-      classification: "VISIBLE_SMOKE",
-      confidence: 0.91,
-      detected_objects: ["smoke", "road", "vehicle"],
-      explanation:
-        "Visible smoke is detected near a roadway with probable vehicle activity. This result should be reviewed by an authorized operator.",
-    });
+    setLoading(true);
+    setError("");
+    setResult(null);
+
+    try {
+      const response = await analyzeEvidence(cleanEvidenceId);
+
+      const data = response?.data || response;
+
+      setResult({
+        classification:
+          data?.classification || "UNKNOWN",
+        confidence:
+          Number(data?.confidence ?? 0),
+        detected_objects:
+          Array.isArray(data?.detected_objects)
+            ? data.detected_objects
+            : [],
+        explanation:
+          data?.explanation ||
+          "AI analysis completed.",
+      });
+    } catch (err) {
+      console.error(
+        "Evidence analysis failed:",
+        err
+      );
+
+      setError(
+        err?.message ||
+          "Evidence analysis failed."
+      );
+    } finally {
+      setLoading(false);
+    }
   }
+
+  const confidencePercent = result
+    ? Math.round(
+        Math.max(
+          0,
+          Math.min(
+            1,
+            result.confidence
+          )
+        ) * 100
+      )
+    : 0;
 
   return (
     <div>
@@ -39,13 +84,15 @@ function EvidenceAnalysis() {
           <h1>
             Evidence
             <span className="dashboard-title-accent">
-              {" "}AI Analysis
+              {" "}
+              AI Analysis
             </span>
           </h1>
 
           <p>
-            Review submitted environmental evidence using AI-assisted visual
-            detection and confidence scoring.
+            Review submitted environmental evidence
+            using AI-assisted visual detection and
+            confidence scoring.
           </p>
         </div>
 
@@ -63,7 +110,9 @@ function EvidenceAnalysis() {
                 ANALYSIS INPUT
               </span>
 
-              <h2>Evidence Inspection</h2>
+              <h2>
+                Evidence Inspection
+              </h2>
             </div>
 
             <ScanSearch size={19} />
@@ -76,19 +125,42 @@ function EvidenceAnalysis() {
               <input
                 value={evidenceId}
                 onChange={(event) =>
-                  setEvidenceId(event.target.value)
+                  setEvidenceId(
+                    event.target.value
+                  )
                 }
                 placeholder="evidence_001"
+                disabled={loading}
               />
             </label>
 
-            <button type="submit">
-              Run AI Inspection →
+            <button
+              type="submit"
+              disabled={
+                loading ||
+                !evidenceId.trim()
+              }
+            >
+              {loading
+                ? "Analyzing..."
+                : "Run AI Inspection →"}
             </button>
           </form>
 
+          {error && (
+            <div
+              style={{
+                marginTop: "12px",
+              }}
+            >
+              {error}
+            </div>
+          )}
+
           <div className="evidence-capabilities">
-            <span>ANALYSIS CAPABILITIES</span>
+            <span>
+              ANALYSIS CAPABILITIES
+            </span>
 
             <div>
               <div>
@@ -116,11 +188,15 @@ function EvidenceAnalysis() {
                 VISUAL INSPECTION
               </span>
 
-              <h2>Evidence Feed</h2>
+              <h2>
+                Evidence Feed
+              </h2>
             </div>
 
             <span className="model-pill">
-              VISION AI
+              {loading
+                ? "ANALYZING"
+                : "VISION AI"}
             </span>
           </div>
 
@@ -132,24 +208,41 @@ function EvidenceAnalysis() {
                 <ImageIcon size={28} />
 
                 <strong>
-                  No evidence analyzed yet
+                  {loading
+                    ? "Analyzing evidence..."
+                    : "No evidence analyzed yet"}
                 </strong>
 
                 <span>
-                  Enter an evidence ID to start inspection.
+                  {loading
+                    ? "Vision AI is processing the submitted evidence."
+                    : "Enter an evidence ID to start inspection."}
                 </span>
               </div>
             ) : (
               <>
-                <div className="vision-target smoke-target">
-                  <span>SMOKE</span>
-                  <strong>91%</strong>
-                </div>
+                {result.detected_objects.map(
+                  (item, index) => (
+                    <div
+                      className={
+                        index === 0
+                          ? "vision-target smoke-target"
+                          : "vision-target vehicle-target"
+                      }
+                      key={item}
+                    >
+                      <span>
+                        {String(
+                          item
+                        ).toUpperCase()}
+                      </span>
 
-                <div className="vision-target vehicle-target">
-                  <span>VEHICLE</span>
-                  <strong>84%</strong>
-                </div>
+                      <strong>
+                        {confidencePercent}%
+                      </strong>
+                    </div>
+                  )
+                )}
 
                 <div className="vision-scan-line" />
               </>
@@ -164,7 +257,9 @@ function EvidenceAnalysis() {
                 AI ASSESSMENT
               </span>
 
-              <h2>Inspection Result</h2>
+              <h2>
+                Inspection Result
+              </h2>
             </div>
 
             {result && (
@@ -176,34 +271,47 @@ function EvidenceAnalysis() {
 
           {!result ? (
             <div className="evidence-result-empty">
-              Run an inspection to view AI analysis.
+              {loading
+                ? "AI inspection is running..."
+                : "Run an inspection to view AI analysis."}
             </div>
           ) : (
             <>
               <div className="evidence-result-summary">
                 <div>
-                  <span>Classification</span>
+                  <span>
+                    Classification
+                  </span>
 
                   <strong>
-                    {result.classification.replaceAll("_", " ")}
+                    {String(
+                      result.classification
+                    ).replaceAll(
+                      "_",
+                      " "
+                    )}
                   </strong>
                 </div>
 
                 <div>
-                  <span>Confidence</span>
+                  <span>
+                    Confidence
+                  </span>
 
                   <strong>
-                    {(result.confidence * 100).toFixed(0)}%
+                    {confidencePercent}%
                   </strong>
                 </div>
               </div>
 
               <div className="authority-confidence">
                 <div>
-                  <span>AI Confidence</span>
+                  <span>
+                    AI Confidence
+                  </span>
 
                   <strong>
-                    {(result.confidence * 100).toFixed(0)}%
+                    {confidencePercent}%
                   </strong>
                 </div>
 
@@ -211,22 +319,35 @@ function EvidenceAnalysis() {
                   <div
                     className="progress-value"
                     style={{
-                      width: `${result.confidence * 100}%`,
+                      width: `${confidencePercent}%`,
                     }}
                   />
                 </div>
               </div>
 
               <div className="evidence-object-row">
-                {result.detected_objects.map((item) => (
-                  <span key={item}>
-                    {item.toUpperCase()}
+                {result.detected_objects.length >
+                0 ? (
+                  result.detected_objects.map(
+                    (item) => (
+                      <span key={item}>
+                        {String(
+                          item
+                        ).toUpperCase()}
+                      </span>
+                    )
+                  )
+                ) : (
+                  <span>
+                    NO OBJECTS REPORTED
                   </span>
-                ))}
+                )}
               </div>
 
               <div className="evidence-ai-explanation">
-                <span>AI EXPLANATION</span>
+                <span>
+                  AI EXPLANATION
+                </span>
 
                 <p>
                   {result.explanation}
@@ -234,8 +355,9 @@ function EvidenceAnalysis() {
               </div>
 
               <div className="analysis-warning">
-                AI-assisted evidence analysis is advisory and must not be
-                treated as definitive proof.
+                AI-assisted evidence analysis is
+                advisory and must not be treated as
+                definitive proof.
               </div>
             </>
           )}

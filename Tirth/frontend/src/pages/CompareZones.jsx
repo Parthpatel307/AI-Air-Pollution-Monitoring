@@ -16,38 +16,17 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-function CompareZones() {
-  const zones = [
-    {
-      zone_id: "zone_001",
-      name: "Ahmedabad",
-      aqi: 142,
-      pm25: 78.4,
-      pm10: 121.2,
-      risk_level: "HIGH",
-      trend: 8,
-    },
-    {
-      zone_id: "zone_002",
-      name: "Gandhinagar",
-      aqi: 96,
-      pm25: 49.1,
-      pm10: 82.3,
-      risk_level: "MODERATE",
-      trend: -3,
-    },
-    {
-      zone_id: "zone_003",
-      name: "Vadodara",
-      aqi: 118,
-      pm25: 62.7,
-      pm10: 101.6,
-      risk_level: "MODERATE",
-      trend: 2,
-    },
-  ];
+import { useZones } from "../hooks/useZones";
 
-  const [selectedMetric, setSelectedMetric] = useState("aqi");
+function CompareZones() {
+  const {
+    zones,
+    loading,
+    error,
+  } = useZones();
+
+  const [selectedMetric, setSelectedMetric] =
+    useState("aqi");
 
   const chartData = useMemo(
     () =>
@@ -60,23 +39,45 @@ function CompareZones() {
             ? zone.pm25
             : zone.pm10,
       })),
-    [selectedMetric]
+    [zones, selectedMetric]
   );
+
+  if (loading) {
+    return (
+      <div>
+        <p>Loading zones...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div>
+        <p>
+          Unable to load zones: {error}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div>
       <div className="dashboard-header compare-v3-header">
         <div>
-          <p className="eyebrow">REGIONAL ENVIRONMENT ANALYTICS</p>
+          <p className="eyebrow">
+            REGIONAL ENVIRONMENT ANALYTICS
+          </p>
 
           <h1>
             Compare
-            <span className="dashboard-title-accent"> Zones</span>
+            <span className="dashboard-title-accent">
+              {" "}Zones
+            </span>
           </h1>
 
           <p>
-            Compare air quality, particulate matter and pollution risk across
-            monitored zones.
+            Compare air quality, particulate matter
+            and pollution risk across monitored zones.
           </p>
         </div>
 
@@ -85,7 +86,9 @@ function CompareZones() {
 
           <select
             value={selectedMetric}
-            onChange={(event) => setSelectedMetric(event.target.value)}
+            onChange={(event) =>
+              setSelectedMetric(event.target.value)
+            }
           >
             <option value="aqi">AQI</option>
             <option value="pm25">PM2.5</option>
@@ -94,40 +97,72 @@ function CompareZones() {
         </div>
       </div>
 
+      {zones.length === 0 && (
+        <div className="card">
+          No monitored zones found.
+        </div>
+      )}
+
       <div className="compare-zone-cards">
         {zones.map((zone) => {
+          const trend = zone.trend ?? 0;
+
           const TrendIcon =
-            zone.trend >= 0 ? TrendingUp : TrendingDown;
+            trend >= 0
+              ? TrendingUp
+              : TrendingDown;
+
+          const riskLevel =
+            zone.risk_level || "UNKNOWN";
 
           return (
-            <section className="card compare-zone-card" key={zone.zone_id}>
+            <section
+              className="card compare-zone-card"
+              key={zone.zone_id}
+            >
               <div className="compare-zone-card-top">
                 <div>
-                  <span className="card-kicker">{zone.zone_id}</span>
-                  <h2>{zone.name}</h2>
+                  <span className="card-kicker">
+                    {zone.zone_id}
+                  </span>
+
+                  <h2>
+                    {zone.name ||
+                      zone.zone_name ||
+                      zone.zone_id}
+                  </h2>
                 </div>
 
                 <span
-                  className={`severity-pill severity-${zone.risk_level.toLowerCase()}`}
+                  className={`severity-pill severity-${riskLevel.toLowerCase()}`}
                 >
-                  {zone.risk_level}
+                  {riskLevel}
                 </span>
               </div>
 
               <div className="compare-zone-main">
                 <span>AQI</span>
-                <strong>{zone.aqi}</strong>
+
+                <strong>
+                  {zone.aqi ?? 0}
+                </strong>
               </div>
 
               <div className="compare-zone-meta">
                 <div>
                   <span>PM2.5</span>
-                  <strong>{zone.pm25}</strong>
+
+                  <strong>
+                    {zone.pm25 ?? 0}
+                  </strong>
                 </div>
 
                 <div>
                   <span>PM10</span>
-                  <strong>{zone.pm10}</strong>
+
+                  <strong>
+                    {zone.pm10 ?? 0}
+                  </strong>
                 </div>
 
                 <div>
@@ -135,13 +170,14 @@ function CompareZones() {
 
                   <strong
                     className={
-                      zone.trend >= 0
+                      trend >= 0
                         ? "trend-up"
                         : "trend-down"
                     }
                   >
                     <TrendIcon size={14} />
-                    {Math.abs(zone.trend)}%
+
+                    {Math.abs(trend)}%
                   </strong>
                 </div>
               </div>
@@ -153,7 +189,10 @@ function CompareZones() {
       <section className="card compare-chart-card">
         <div className="card-header">
           <div>
-            <span className="card-kicker">VISUAL COMPARISON</span>
+            <span className="card-kicker">
+              VISUAL COMPARISON
+            </span>
+
             <h2>
               {selectedMetric === "aqi"
                 ? "AQI"
@@ -168,7 +207,10 @@ function CompareZones() {
         </div>
 
         <div className="compare-chart-wrap">
-          <ResponsiveContainer width="100%" height={320}>
+          <ResponsiveContainer
+            width="100%"
+            height={320}
+          >
             <BarChart data={chartData}>
               <CartesianGrid
                 stroke="rgba(255,255,255,0.05)"
@@ -197,7 +239,8 @@ function CompareZones() {
               <Tooltip
                 contentStyle={{
                   background: "#0d1c1a",
-                  border: "1px solid rgba(212,241,232,0.08)",
+                  border:
+                    "1px solid rgba(212,241,232,0.08)",
                   borderRadius: "12px",
                   color: "#ecf5f1",
                 }}
@@ -216,7 +259,10 @@ function CompareZones() {
       <section className="card compare-ranking-card">
         <div className="card-header">
           <div>
-            <span className="card-kicker">RISK RANKING</span>
+            <span className="card-kicker">
+              RISK RANKING
+            </span>
+
             <h2>Zone Ranking</h2>
           </div>
 
@@ -238,15 +284,29 @@ function CompareZones() {
 
             <tbody>
               {[...zones]
-                .sort((a, b) => b.aqi - a.aqi)
+                .sort(
+                  (a, b) =>
+                    (b.aqi ?? 0) -
+                    (a.aqi ?? 0)
+                )
                 .map((zone, index) => (
                   <tr key={zone.zone_id}>
                     <td>#{index + 1}</td>
-                    <td>{zone.name}</td>
-                    <td>{zone.aqi}</td>
-                    <td>{zone.pm25}</td>
-                    <td>{zone.pm10}</td>
-                    <td>{zone.risk_level}</td>
+
+                    <td>
+                      {zone.name ||
+                        zone.zone_name ||
+                        zone.zone_id}
+                    </td>
+
+                    <td>{zone.aqi ?? 0}</td>
+                    <td>{zone.pm25 ?? 0}</td>
+                    <td>{zone.pm10 ?? 0}</td>
+
+                    <td>
+                      {zone.risk_level ||
+                        "UNKNOWN"}
+                    </td>
                   </tr>
                 ))}
             </tbody>

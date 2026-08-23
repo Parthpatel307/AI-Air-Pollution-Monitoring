@@ -1,7 +1,55 @@
 import { useState } from "react";
+import { sendAIChat } from "../../services/aiService";
 
-function AIChat() {
+function getMessageText(response) {
+  const data = response?.data || response;
+
+  if (!data) {
+    return "AI returned an empty response.";
+  }
+
+  if (typeof data === "string") {
+    return data;
+  }
+
+  return (
+    data.answer ||
+    data.response ||
+    data.message ||
+    data.analysis ||
+    data.explanation ||
+    data.summary ||
+    data.text ||
+    JSON.stringify(data, null, 2)
+  );
+}
+
+function getErrorMessage(error) {
+  const value = error?.message ?? error;
+
+  if (typeof value === "string") {
+    return value;
+  }
+
+  if (value?.detail?.error?.message) {
+    return value.detail.error.message;
+  }
+
+  if (value?.error?.message) {
+    return value.error.message;
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "AI chat request failed.";
+  }
+}
+
+function AIChat({ zoneId = "zone_001" }) {
   const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
   const [messages, setMessages] = useState([
     {
       id: 1,
@@ -10,12 +58,14 @@ function AIChat() {
     },
   ]);
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
 
     const value = message.trim();
 
-    if (!value) return;
+    if (!value || loading) {
+      return;
+    }
 
     const userMessage = {
       id: Date.now(),
@@ -23,32 +73,62 @@ function AIChat() {
       text: value,
     };
 
-    const aiMessage = {
-      id: Date.now() + 1,
-      role: "assistant",
-      text: "Backend AI integration is pending. This interface is ready for POST /api/v1/ai/chat.",
-    };
-
     setMessages((previous) => [
       ...previous,
       userMessage,
-      aiMessage,
     ]);
 
     setMessage("");
+    setLoading(true);
+
+    try {
+      const response = await sendAIChat({
+        message: value,
+        zoneId,
+      });
+
+      const aiMessage = {
+        id: Date.now() + 1,
+        role: "assistant",
+        text: getMessageText(response),
+      };
+
+      setMessages((previous) => [
+        ...previous,
+        aiMessage,
+      ]);
+    } catch (error) {
+      console.error("AI chat failed:", error);
+
+      const aiMessage = {
+        id: Date.now() + 1,
+        role: "assistant",
+        text: `Error: ${getErrorMessage(error)}`,
+      };
+
+      setMessages((previous) => [
+        ...previous,
+        aiMessage,
+      ]);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <section className="card ai-chat-card">
       <div className="card-header">
         <div>
-          <span className="card-kicker">ENVIRONMENT COPILOT</span>
+          <span className="card-kicker">
+            ENVIRONMENT COPILOT
+          </span>
+
           <h2>AI Assistant</h2>
         </div>
 
         <span className="ai-status">
           <span />
-          ONLINE
+          {loading ? "THINKING" : "ONLINE"}
         </span>
       </div>
 
@@ -63,7 +143,9 @@ function AIChat() {
             }`}
           >
             <div className="chat-avatar">
-              {item.role === "user" ? "YOU" : "AI"}
+              {item.role === "user"
+                ? "YOU"
+                : "AI"}
             </div>
 
             <div className="chat-bubble">
@@ -71,25 +153,49 @@ function AIChat() {
             </div>
           </div>
         ))}
+
+        {loading && (
+          <div className="chat-message chat-assistant">
+            <div className="chat-avatar">
+              AI
+            </div>
+
+            <div className="chat-bubble">
+              Analyzing current environmental data...
+            </div>
+          </div>
+        )}
       </div>
 
-      <form className="chat-form" onSubmit={handleSubmit}>
+      <form
+        className="chat-form"
+        onSubmit={handleSubmit}
+      >
         <input
           value={message}
-          onChange={(event) => setMessage(event.target.value)}
+          onChange={(event) =>
+            setMessage(event.target.value)
+          }
           placeholder="Ask about pollution conditions..."
+          disabled={loading}
         />
 
-        <button type="submit">
-          Send
+        <button
+          type="submit"
+          disabled={loading || !message.trim()}
+        >
+          {loading ? "Thinking..." : "Send"}
         </button>
       </form>
 
       <div className="chat-suggestions">
         <button
           type="button"
+          disabled={loading}
           onClick={() =>
-            setMessage("Why is AQI increasing today?")
+            setMessage(
+              "Why is AQI increasing today?"
+            )
           }
         >
           Why AQI increased?
@@ -97,8 +203,11 @@ function AIChat() {
 
         <button
           type="button"
+          disabled={loading}
           onClick={() =>
-            setMessage("What is the safest time to go outside?")
+            setMessage(
+              "What is the safest time to go outside?"
+            )
           }
         >
           Safest time outside

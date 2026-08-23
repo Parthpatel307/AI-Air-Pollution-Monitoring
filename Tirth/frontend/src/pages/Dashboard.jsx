@@ -14,6 +14,8 @@ import AIAnalysis from "../components/ai/AIAnalysis";
 import AIChat from "../components/ai/AIChat";
 
 import { useAQI } from "../hooks/useAQI";
+import { useForecast } from "../hooks/useForecast";
+import { useHotspots } from "../hooks/useHotspots";
 import { useAppContext } from "../context/AppContext";
 
 function Dashboard() {
@@ -24,6 +26,18 @@ function Dashboard() {
     loading,
     error,
   } = useAQI(selectedZone);
+
+  const {
+    data: forecastData,
+    loading: forecastLoading,
+    error: forecastError,
+  } = useForecast(selectedZone, 24);
+
+  const {
+    hotspots,
+    loading: hotspotsLoading,
+    error: hotspotsError,
+  } = useHotspots(selectedZone);
 
   const demoAQI = {
     zone_id: selectedZone,
@@ -40,44 +54,17 @@ function Dashboard() {
 
   const currentAQI = apiAQI || demoAQI;
 
-  const forecast = [
-    {
-      timestamp: "09:00",
-      predicted_aqi: 126,
-      risk_level: "MODERATE",
-      confidence: 0.91,
-    },
-    {
-      timestamp: "12:00",
-      predicted_aqi: 148,
-      risk_level: "HIGH",
-      confidence: 0.87,
-    },
-    {
-      timestamp: "15:00",
-      predicted_aqi: 156,
-      risk_level: "HIGH",
-      confidence: 0.82,
-    },
-    {
-      timestamp: "18:00",
-      predicted_aqi: 164,
-      risk_level: "HIGH",
-      confidence: 0.84,
-    },
-    {
-      timestamp: "21:00",
-      predicted_aqi: 139,
-      risk_level: "MODERATE",
-      confidence: 0.88,
-    },
-    {
-      timestamp: "00:00",
-      predicted_aqi: 118,
-      risk_level: "MODERATE",
-      confidence: 0.86,
-    },
-  ];
+  const forecast = forecastData?.forecast || [];
+
+  const latestForecast =
+    forecast.length > 0
+      ? forecast[0]
+      : null;
+
+  const primaryHotspot =
+    hotspots?.length > 0
+      ? hotspots[0]
+      : null;
 
   const zones = [
     {
@@ -97,17 +84,6 @@ function Dashboard() {
     },
   ];
 
-  const hotspots = [
-    {
-      hotspot_id: "hotspot_001",
-      aqi: 178,
-    },
-    {
-      hotspot_id: "hotspot_002",
-      aqi: 164,
-    },
-  ];
-
   return (
     <div>
       <div className="dashboard-header dashboard-v2-header">
@@ -117,7 +93,8 @@ function Dashboard() {
           </p>
 
           <h1>
-            Ahmedabad
+            {currentAQI.zone_name || "Air Quality"}
+
             <span className="dashboard-title-accent">
               {" "}Air Quality
             </span>
@@ -148,6 +125,7 @@ function Dashboard() {
 
           <div className="dashboard-time">
             <span>LAST UPDATED</span>
+
             <strong>
               {new Date(
                 currentAQI.timestamp
@@ -179,12 +157,31 @@ function Dashboard() {
         />
 
         <ForecastRiskCard
-          predictedAQI={148}
-          riskLevel="HIGH"
-          confidence={0.87}
-          timestamp={new Date().toISOString()}
+          predictedAQI={
+            latestForecast?.predicted_aqi ?? 0
+          }
+          riskLevel={
+            latestForecast?.risk_level ?? "UNKNOWN"
+          }
+          confidence={
+            latestForecast?.confidence ?? 0
+          }
+          timestamp={
+            latestForecast?.timestamp ??
+            new Date().toISOString()
+          }
         />
       </div>
+
+      {forecastLoading && (
+        <p>Loading forecast...</p>
+      )}
+
+      {forecastError && (
+        <p>
+          Forecast unavailable: {forecastError}
+        </p>
+      )}
 
       <div className="dashboard-main-grid">
         <div className="dashboard-main-column">
@@ -198,17 +195,24 @@ function Dashboard() {
           />
 
           <div className="dashboard-two-column">
-            <HotspotCard
-              hotspotId="hotspot_001"
-              latitude={23.0225}
-              longitude={72.5714}
-              severity="HIGH"
-              aqi={178}
-              pollutants={[
-                "PM2.5",
-                "PM10",
-              ]}
-            />
+            {primaryHotspot ? (
+              <HotspotCard
+                hotspotId={primaryHotspot.hotspot_id}
+                latitude={primaryHotspot.latitude}
+                longitude={primaryHotspot.longitude}
+                severity={primaryHotspot.severity}
+                aqi={primaryHotspot.aqi}
+                pollutants={[]}
+              />
+            ) : (
+              <div className="card">
+                {hotspotsLoading
+                  ? "Loading hotspots..."
+                  : hotspotsError
+                  ? `Hotspot error: ${hotspotsError}`
+                  : "No hotspots found."}
+              </div>
+            )}
 
             <RiskClusters
               clusters={[
@@ -233,20 +237,8 @@ function Dashboard() {
           />
 
           <SourceAttribution
-            sources={[
-              {
-                source: "VEHICLE_TRAFFIC",
-                confidence: 0.78,
-              },
-              {
-                source: "ROAD_DUST",
-                confidence: 0.64,
-              },
-              {
-                source: "INDUSTRIAL_ACTIVITY",
-                confidence: 0.41,
-              },
-            ]}
+            zoneId={selectedZone}
+            aqiData={currentAQI}
           />
 
           <AIDiagnosis
@@ -259,13 +251,10 @@ function Dashboard() {
           />
 
           <ForecastExplanation
-            explanation="AQI is expected to remain elevated during peak traffic hours before improving later tonight."
-            keyFactors={[
-              "PM2.5 concentration",
-              "Low wind speed",
-              "Traffic activity",
-            ]}
+            zoneId={selectedZone}
+            forecast={forecast}
           />
+          
         </div>
       </div>
 
