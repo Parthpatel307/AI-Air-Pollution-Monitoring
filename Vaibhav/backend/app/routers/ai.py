@@ -318,7 +318,7 @@ def ai_analyze(
     payload: dict,
     user: dict = Depends(
         require_roles(
-            ["AUTHORITY", "ADMIN"]
+            ["AUTHORITY", "ADMIN", "CITIZEN"]
         )
     ),
 ) -> dict:
