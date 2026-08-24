@@ -424,7 +424,7 @@ def ai_chat(
     payload: dict,
     user: dict = Depends(
         require_roles(
-            ["AUTHORITY", "ADMIN"]
+            ["AUTHORITY", "ADMIN","CITIZEN"]
         )
     ),
 ) -> dict:
