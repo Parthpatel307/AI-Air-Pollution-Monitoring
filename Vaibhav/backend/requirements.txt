@@ -5,3 +5,4 @@ pydantic-settings
 pytest
 httpx
 python-multipart
+pandas
