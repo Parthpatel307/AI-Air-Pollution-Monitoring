@@ -71,7 +71,9 @@ def _load_parth_integrations():
         ) from exc
 
 
-def _get_latest_aqi_reading(zone_id: str) -> dict[str, Any]:
+def _get_latest_aqi_reading(
+    zone_id: str,
+) -> dict[str, Any]:
     db = get_firestore()
 
     zone_document = (
@@ -153,7 +155,10 @@ def get_ai_insights(
         zone_id
     )
 
-    aqi = _number(reading, "aqi")
+    aqi = _number(
+        reading,
+        "aqi",
+    )
 
     if aqi >= 201:
         risk_level = "SEVERE"
@@ -209,7 +214,9 @@ def ai_source_detection(
 ) -> dict:
     integrations = _load_parth_integrations()
 
-    zone_id = payload.get("zone_id")
+    zone_id = payload.get(
+        "zone_id"
+    )
 
     if not zone_id:
         raise HTTPException(
@@ -224,13 +231,26 @@ def ai_source_detection(
         )
 
     # Frontend sends pollutants and weather separately.
-    pollutants = payload.get("pollutants") or {}
-    weather = payload.get("weather") or {}
+    pollutants = (
+        payload.get("pollutants")
+        or {}
+    )
 
-    if not isinstance(pollutants, dict):
+    weather = (
+        payload.get("weather")
+        or {}
+    )
+
+    if not isinstance(
+        pollutants,
+        dict,
+    ):
         pollutants = {}
 
-    if not isinstance(weather, dict):
+    if not isinstance(
+        weather,
+        dict,
+    ):
         weather = {}
 
     reading = _get_latest_aqi_reading(
@@ -242,54 +262,83 @@ def ai_source_detection(
         "aqi": _number(
             pollutants,
             "aqi",
-            _number(reading, "aqi"),
+            _number(
+                reading,
+                "aqi",
+            ),
         ),
         "pm25": _number(
             pollutants,
             "pm25",
-            _number(reading, "pm25"),
+            _number(
+                reading,
+                "pm25",
+            ),
         ),
         "pm10": _number(
             pollutants,
             "pm10",
-            _number(reading, "pm10"),
+            _number(
+                reading,
+                "pm10",
+            ),
         ),
         "no2": _number(
             pollutants,
             "no2",
-            _number(reading, "no2"),
+            _number(
+                reading,
+                "no2",
+            ),
         ),
         "so2": _number(
             pollutants,
             "so2",
-            _number(reading, "so2"),
+            _number(
+                reading,
+                "so2",
+            ),
         ),
         "co": _number(
             pollutants,
             "co",
-            _number(reading, "co"),
+            _number(
+                reading,
+                "co",
+            ),
         ),
         "temperature": _number(
             weather,
             "temperature",
-            _number(reading, "temperature"),
+            _number(
+                reading,
+                "temperature",
+            ),
         ),
         "humidity": _number(
             weather,
             "humidity",
-            _number(reading, "humidity"),
+            _number(
+                reading,
+                "humidity",
+            ),
         ),
         "wind_speed": _number(
             weather,
             "wind_speed",
-            _number(reading, "wind_speed"),
+            _number(
+                reading,
+                "wind_speed",
+            ),
         ),
     }
 
     try:
         return integrations[
             "source_detection"
-        ](source_input)
+        ](
+            source_input
+        )
 
     except HTTPException:
         raise
@@ -318,14 +367,23 @@ def ai_analyze(
     payload: dict,
     user: dict = Depends(
         require_roles(
-            ["AUTHORITY", "ADMIN", "CITIZEN"]
+            [
+                "AUTHORITY",
+                "ADMIN",
+                "CITIZEN",
+            ]
         )
     ),
 ) -> dict:
     integrations = _load_parth_integrations()
 
-    zone_id = payload.get("zone_id")
-    question = payload.get("question")
+    zone_id = payload.get(
+        "zone_id"
+    )
+
+    question = payload.get(
+        "question"
+    )
 
     if not zone_id:
         raise HTTPException(
@@ -356,7 +414,9 @@ def ai_analyze(
     )
 
     try:
-        return integrations["air_quality"](
+        return integrations[
+            "air_quality"
+        ](
             zone_id=zone_id,
             aqi=_number(
                 reading,
@@ -394,7 +454,9 @@ def ai_analyze(
                 reading,
                 "wind_speed",
             ),
-            question=str(question),
+            question=str(
+                question
+            ),
         )
 
     except HTTPException:
@@ -424,14 +486,23 @@ def ai_chat(
     payload: dict,
     user: dict = Depends(
         require_roles(
-            ["AUTHORITY", "ADMIN","CITIZEN"]
+            [
+                "AUTHORITY",
+                "ADMIN",
+                "CITIZEN",
+            ]
         )
     ),
 ) -> dict:
     integrations = _load_parth_integrations()
 
-    message = payload.get("message")
-    zone_id = payload.get("zone_id")
+    message = payload.get(
+        "message"
+    )
+
+    zone_id = payload.get(
+        "zone_id"
+    )
 
     if not message:
         raise HTTPException(
@@ -461,8 +532,63 @@ def ai_chat(
         zone_id
     )
 
+    # Load human-readable zone information so Gemini
+    # understands that e.g. zone_001 may represent Ahmedabad.
+    db = get_firestore()
+
+    zone_document = (
+        db.collection("zones")
+        .document(zone_id)
+        .get()
+    )
+
+    zone_data = (
+        zone_document.to_dict()
+        if zone_document.exists
+        else {}
+    )
+
+    if not isinstance(
+        zone_data,
+        dict,
+    ):
+        zone_data = {}
+
+    zone_name = str(
+        zone_data.get(
+            "name",
+            zone_id,
+        )
+    )
+
+    risk_level = str(
+        zone_data.get(
+            "risk_level",
+            "UNKNOWN",
+        )
+    )
+
+    reading_timestamp = reading.get(
+        "timestamp"
+    )
+
+    if reading_timestamp is not None:
+        reading_timestamp = str(
+            reading_timestamp
+        )
+
     context = {
         "zone_id": zone_id,
+        "zone_name": zone_name,
+        "latitude": _number(
+            zone_data,
+            "latitude",
+        ),
+        "longitude": _number(
+            zone_data,
+            "longitude",
+        ),
+        "risk_level": risk_level,
         "aqi": _number(
             reading,
             "aqi",
@@ -499,11 +625,18 @@ def ai_chat(
             reading,
             "wind_speed",
         ),
+        "reading_timestamp": (
+            reading_timestamp
+        ),
     }
 
     try:
-        return integrations["chat"](
-            message=str(message),
+        return integrations[
+            "chat"
+        ](
+            message=str(
+                message
+            ),
             zone_id=zone_id,
             context=context,
         )
@@ -539,8 +672,13 @@ def ai_forecast_explain(
 ) -> dict:
     integrations = _load_parth_integrations()
 
-    zone_id = payload.get("zone_id")
-    forecast = payload.get("forecast")
+    zone_id = payload.get(
+        "zone_id"
+    )
+
+    forecast = payload.get(
+        "forecast"
+    )
 
     if not zone_id:
         raise HTTPException(
@@ -556,14 +694,20 @@ def ai_forecast_explain(
 
     # Frontend may send complete forecast array
     # or a single forecast object.
-    if isinstance(forecast, list):
+    if isinstance(
+        forecast,
+        list,
+    ):
         forecast_item = (
             forecast[0]
             if forecast
             else {}
         )
 
-    elif isinstance(forecast, dict):
+    elif isinstance(
+        forecast,
+        dict,
+    ):
         forecast_item = forecast
 
     else:
@@ -581,7 +725,9 @@ def ai_forecast_explain(
                 "==",
                 zone_id,
             )
-            .order_by("timestamp")
+            .order_by(
+                "timestamp"
+            )
             .limit(1)
             .stream()
         )
@@ -628,9 +774,11 @@ def ai_forecast_explain(
         "confidence",
     )
 
-    key_factors = forecast_item.get(
-        "key_factors",
-        [],
+    key_factors = (
+        forecast_item.get(
+            "key_factors",
+            [],
+        )
     )
 
     if not isinstance(
@@ -710,7 +858,9 @@ def ai_evidence_analyze(
 
     evidence_document = (
         db.collection("evidence")
-        .document(str(evidence_id))
+        .document(
+            str(evidence_id)
+        )
         .get()
     )
 
@@ -783,7 +933,9 @@ def ai_evidence_analyze(
             },
         )
 
-    image_path = Path(storage_path)
+    image_path = Path(
+        storage_path
+    )
 
     if not image_path.is_absolute():
         backend_root = (
@@ -815,7 +967,9 @@ def ai_evidence_analyze(
         )
 
     try:
-        return integrations["evidence"](
+        return integrations[
+            "evidence"
+        ](
             str(image_path)
         )
 
