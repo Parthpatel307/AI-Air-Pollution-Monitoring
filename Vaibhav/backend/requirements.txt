@@ -6,3 +6,8 @@ pytest
 httpx
 python-multipart
 pandas
+numpy
+scikit-learn
+joblib
+python-dotenv
+google-genai
