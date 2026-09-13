@@ -1,30 +1,91 @@
-import { useEffect, useState } from "react";
-import { getAQIHistory } from "../services/aqiService";
+import {
+  useEffect,
+  useState,
+} from "react";
 
-export function useAQIHistory(zoneId, limit = 24) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
+import {
+  getLiveAQIHistory,
+} from "../services/aqiService";
+
+
+export function useAQIHistory(
+  zoneId,
+  hours = 24
+) {
+  const [
+    data,
+    setData,
+  ] = useState(null);
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState(null);
+
 
   useEffect(() => {
     let cancelled = false;
 
+
     async function loadHistory() {
+      if (!zoneId) {
+        setData(null);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+
       setLoading(true);
       setError(null);
 
+
       try {
-        const result = await getAQIHistory({
-          zoneId,
-          limit,
-        });
+        const result =
+          await getLiveAQIHistory({
+            zoneId,
+            hours,
+          });
+
+
+        /*
+         * Backend history-live returns:
+         *
+         * {
+         *   success: true,
+         *   data: {
+         *     zone_id,
+         *     readings: [...]
+         *   }
+         * }
+         *
+         * This also supports apiRequest
+         * implementations that already
+         * unwrap "data".
+         */
+        const normalized =
+          result?.data?.readings
+            ? result.data
+            : result;
+
 
         if (!cancelled) {
-          setData(result);
+          setData(
+            normalized
+          );
         }
       } catch (err) {
         if (!cancelled) {
-          setError(err.message);
+          setData(null);
+
+          setError(
+            err?.message ||
+              "Unable to load AQI history."
+          );
         }
       } finally {
         if (!cancelled) {
@@ -33,12 +94,18 @@ export function useAQIHistory(zoneId, limit = 24) {
       }
     }
 
+
     loadHistory();
+
 
     return () => {
       cancelled = true;
     };
-  }, [zoneId, limit]);
+  }, [
+    zoneId,
+    hours,
+  ]);
+
 
   return {
     data,

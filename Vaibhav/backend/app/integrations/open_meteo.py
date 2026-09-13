@@ -1,6 +1,7 @@
-"""Open-Meteo live environmental data integration."""
+"""Open-Meteo environmental data integration."""
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 from time import monotonic
 from typing import Any
 
@@ -18,9 +19,10 @@ WEATHER_URL = (
 )
 
 
-# Cache successful live responses for 5 minutes.
-# This prevents repeated frontend refreshes from
-# continuously calling Open-Meteo.
+# ---------------------------------------------------------
+# Cache
+# ---------------------------------------------------------
+
 LIVE_CACHE_TTL_SECONDS = 300.0
 
 
@@ -42,6 +44,15 @@ _BULK_LIVE_CACHE: dict[
 ] = {}
 
 
+_HISTORY_CACHE: dict[
+    tuple[float, float, int],
+    tuple[
+        float,
+        list[dict[str, Any]],
+    ],
+] = {}
+
+
 # ---------------------------------------------------------
 # AQI category
 # ---------------------------------------------------------
@@ -49,10 +60,6 @@ _BULK_LIVE_CACHE: dict[
 def _aqi_category(
     aqi: float | int | None,
 ) -> str:
-    """
-    Convert US AQI value to a readable category.
-    """
-
     if aqi is None:
         return "UNKNOWN"
 
@@ -65,7 +72,9 @@ def _aqi_category(
         return "MODERATE"
 
     if value <= 150:
-        return "UNHEALTHY_FOR_SENSITIVE_GROUPS"
+        return (
+            "UNHEALTHY_FOR_SENSITIVE_GROUPS"
+        )
 
     if value <= 200:
         return "UNHEALTHY"
@@ -83,12 +92,6 @@ def _aqi_category(
 def _as_location_list(
     data: Any,
 ) -> list[dict[str, Any]]:
-    """
-    Open-Meteo returns:
-    - dict for one location
-    - list of dicts for multiple locations
-    """
-
     if isinstance(
         data,
         list,
@@ -106,9 +109,7 @@ def _as_location_list(
         data,
         dict,
     ):
-        return [
-            data
-        ]
+        return [data]
 
     return []
 
@@ -119,20 +120,14 @@ def _coordinate_string(
     ],
     field: str,
 ) -> str:
-    """
-    Convert coordinates into comma-separated
-    Open-Meteo multi-location format.
-    """
-
     return ",".join(
         str(
             float(
-                location[
-                    field
-                ]
+                location[field]
             )
         )
-        for location in locations
+        for location
+        in locations
     )
 
 
@@ -142,25 +137,18 @@ def _parse_air_quality(
     fallback_latitude: float,
     fallback_longitude: float,
 ) -> dict[str, Any]:
-
     current = (
-        data.get(
-            "current"
-        )
+        data.get("current")
         or {}
     )
 
     units = (
-        data.get(
-            "current_units"
-        )
+        data.get("current_units")
         or {}
     )
 
-    aqi = (
-        current.get(
-            "us_aqi"
-        )
+    aqi = current.get(
+        "us_aqi"
     )
 
     return {
@@ -272,18 +260,13 @@ def _parse_weather(
     fallback_latitude: float,
     fallback_longitude: float,
 ) -> dict[str, Any]:
-
     current = (
-        data.get(
-            "current"
-        )
+        data.get("current")
         or {}
     )
 
     units = (
-        data.get(
-            "current_units"
-        )
+        data.get("current_units")
         or {}
     )
 
@@ -373,7 +356,7 @@ def _parse_weather(
 
 
 # ---------------------------------------------------------
-# Single location AQI
+# Current air quality
 # ---------------------------------------------------------
 
 def get_current_air_quality(
@@ -381,11 +364,6 @@ def get_current_air_quality(
     latitude: float,
     longitude: float,
 ) -> dict[str, Any]:
-    """
-    Fetch current air-quality data
-    from Open-Meteo.
-    """
-
     current_variables = ",".join(
         [
             "us_aqi",
@@ -401,7 +379,6 @@ def get_current_air_quality(
     with httpx.Client(
         timeout=20.0
     ) as client:
-
         response = client.get(
             AIR_QUALITY_URL,
             params={
@@ -421,23 +398,262 @@ def get_current_air_quality(
 
     response.raise_for_status()
 
-    data = (
-        response.json()
-    )
-
-    return (
-        _parse_air_quality(
-            data,
-            fallback_latitude=
-                latitude,
-            fallback_longitude=
-                longitude,
-        )
+    return _parse_air_quality(
+        response.json(),
+        fallback_latitude=
+            latitude,
+        fallback_longitude=
+            longitude,
     )
 
 
 # ---------------------------------------------------------
-# AQI forecast
+# Historical air quality
+# ---------------------------------------------------------
+
+def get_air_quality_history(
+    *,
+    latitude: float,
+    longitude: float,
+    hours: int = 24,
+) -> list[dict[str, Any]]:
+    """
+    Fetch real hourly historical AQI data.
+
+    24  = last 24 hours
+    168 = last 7 days
+    720 = last 30 days
+    """
+
+    safe_hours = max(
+        1,
+        min(
+            int(hours),
+            720,
+        ),
+    )
+
+    cache_key = (
+        round(
+            float(latitude),
+            5,
+        ),
+        round(
+            float(longitude),
+            5,
+        ),
+        safe_hours,
+    )
+
+    now_monotonic = (
+        monotonic()
+    )
+
+    cached = (
+        _HISTORY_CACHE.get(
+            cache_key
+        )
+    )
+
+    if (
+        cached is not None
+        and
+        now_monotonic
+        - cached[0]
+        < LIVE_CACHE_TTL_SECONDS
+    ):
+        return deepcopy(
+            cached[1]
+        )
+
+    # Exact UTC hour range.
+    # Using start_hour/end_hour prevents
+    # future forecast points appearing
+    # inside History.
+    end_time = (
+        datetime.now(
+            timezone.utc
+        )
+        .replace(
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    )
+
+    start_time = (
+        end_time
+        - timedelta(
+            hours=
+                safe_hours - 1
+        )
+    )
+
+    hourly_variables = ",".join(
+        [
+            "us_aqi",
+            "pm2_5",
+            "pm10",
+        ]
+    )
+
+    with httpx.Client(
+        timeout=30.0
+    ) as client:
+        response = client.get(
+            AIR_QUALITY_URL,
+            params={
+                "latitude":
+                    latitude,
+
+                "longitude":
+                    longitude,
+
+                "hourly":
+                    hourly_variables,
+
+                "start_hour":
+                    start_time.strftime(
+                        "%Y-%m-%dT%H:%M"
+                    ),
+
+                "end_hour":
+                    end_time.strftime(
+                        "%Y-%m-%dT%H:%M"
+                    ),
+
+                "timezone":
+                    "GMT",
+            },
+        )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    hourly = (
+        data.get("hourly")
+        or {}
+    )
+
+    times = (
+        hourly.get("time")
+        or []
+    )
+
+    aqis = (
+        hourly.get("us_aqi")
+        or []
+    )
+
+    pm25_values = (
+        hourly.get("pm2_5")
+        or []
+    )
+
+    pm10_values = (
+        hourly.get("pm10")
+        or []
+    )
+
+    total = min(
+        len(times),
+        len(aqis),
+        len(pm25_values),
+        len(pm10_values),
+    )
+
+    readings: list[
+        dict[str, Any]
+    ] = []
+
+    for index in range(
+        total
+    ):
+        aqi = aqis[index]
+
+        if aqi is None:
+            continue
+
+        timestamp = (
+            times[index]
+        )
+
+        # Open-Meteo GMT timestamps
+        # do not contain Z by default.
+        if (
+            timestamp
+            and
+            not timestamp.endswith(
+                "Z"
+            )
+            and
+            "+" not in timestamp
+        ):
+            timestamp = (
+                f"{timestamp}Z"
+            )
+
+        pm25 = (
+            pm25_values[
+                index
+            ]
+        )
+
+        pm10 = (
+            pm10_values[
+                index
+            ]
+        )
+
+        readings.append(
+            {
+                "timestamp":
+                    timestamp,
+
+                "aqi":
+                    float(aqi),
+
+                "category":
+                    _aqi_category(
+                        aqi
+                    ),
+
+                "pm25":
+                    (
+                        float(pm25)
+                        if pm25
+                        is not None
+                        else None
+                    ),
+
+                "pm10":
+                    (
+                        float(pm10)
+                        if pm10
+                        is not None
+                        else None
+                    ),
+
+                "source":
+                    "open_meteo",
+            }
+        )
+
+    _HISTORY_CACHE[
+        cache_key
+    ] = (
+        monotonic(),
+        deepcopy(
+            readings
+        ),
+    )
+
+    return readings
+
+
+# ---------------------------------------------------------
+# Air quality forecast
 # ---------------------------------------------------------
 
 def get_air_quality_forecast(
@@ -446,17 +662,10 @@ def get_air_quality_forecast(
     longitude: float,
     hours: int = 24,
 ) -> list[dict[str, Any]]:
-    """
-    Fetch hourly US AQI forecast
-    from Open-Meteo.
-    """
-
     safe_hours = max(
         1,
         min(
-            int(
-                hours
-            ),
+            int(hours),
             168,
         ),
     )
@@ -464,7 +673,6 @@ def get_air_quality_forecast(
     with httpx.Client(
         timeout=20.0
     ) as client:
-
         response = client.get(
             AIR_QUALITY_URL,
             params={
@@ -487,28 +695,20 @@ def get_air_quality_forecast(
 
     response.raise_for_status()
 
-    data = (
-        response.json()
-    )
+    data = response.json()
 
     hourly = (
-        data.get(
-            "hourly"
-        )
+        data.get("hourly")
         or {}
     )
 
     times = (
-        hourly.get(
-            "time"
-        )
+        hourly.get("time")
         or []
     )
 
     aqis = (
-        hourly.get(
-            "us_aqi"
-        )
+        hourly.get("us_aqi")
         or []
     )
 
@@ -523,7 +723,6 @@ def get_air_quality_forecast(
         times,
         aqis,
     ):
-
         if aqi is None:
             continue
 
@@ -533,9 +732,7 @@ def get_air_quality_forecast(
                     timestamp,
 
                 "predicted_aqi":
-                    float(
-                        aqi
-                    ),
+                    float(aqi),
 
                 "risk_level":
                     _aqi_category(
@@ -554,7 +751,7 @@ def get_air_quality_forecast(
 
 
 # ---------------------------------------------------------
-# Single location weather
+# Current weather
 # ---------------------------------------------------------
 
 def get_current_weather(
@@ -562,11 +759,6 @@ def get_current_weather(
     latitude: float,
     longitude: float,
 ) -> dict[str, Any]:
-    """
-    Fetch current weather data
-    from Open-Meteo.
-    """
-
     current_variables = ",".join(
         [
             "temperature_2m",
@@ -582,7 +774,6 @@ def get_current_weather(
     with httpx.Client(
         timeout=20.0
     ) as client:
-
         response = client.get(
             WEATHER_URL,
             params={
@@ -602,23 +793,17 @@ def get_current_weather(
 
     response.raise_for_status()
 
-    data = (
-        response.json()
-    )
-
-    return (
-        _parse_weather(
-            data,
-            fallback_latitude=
-                latitude,
-            fallback_longitude=
-                longitude,
-        )
+    return _parse_weather(
+        response.json(),
+        fallback_latitude=
+            latitude,
+        fallback_longitude=
+            longitude,
     )
 
 
 # ---------------------------------------------------------
-# Single location combined environment
+# Single live AQI + weather
 # ---------------------------------------------------------
 
 def get_live_environment_data(
@@ -626,32 +811,18 @@ def get_live_environment_data(
     latitude: float,
     longitude: float,
 ) -> dict[str, Any]:
-    """
-    Fetch live/current AQI and weather
-    for one geographical location.
-
-    Successful results are cached
-    for five minutes.
-    """
-
     cache_key = (
         round(
-            float(
-                latitude
-            ),
+            float(latitude),
             5,
         ),
         round(
-            float(
-                longitude
-            ),
+            float(longitude),
             5,
         ),
     )
 
-    now = (
-        monotonic()
-    )
+    now = monotonic()
 
     cached = (
         _SINGLE_LIVE_CACHE.get(
@@ -671,21 +842,15 @@ def get_live_environment_data(
 
     air_quality = (
         get_current_air_quality(
-            latitude=
-                latitude,
-
-            longitude=
-                longitude,
+            latitude=latitude,
+            longitude=longitude,
         )
     )
 
     weather = (
         get_current_weather(
-            latitude=
-                latitude,
-
-            longitude=
-                longitude,
+            latitude=latitude,
+            longitude=longitude,
         )
     )
 
@@ -710,16 +875,14 @@ def get_live_environment_data(
         cache_key
     ] = (
         monotonic(),
-        deepcopy(
-            result
-        ),
+        deepcopy(result),
     )
 
     return result
 
 
 # ---------------------------------------------------------
-# BULK LIVE NETWORK
+# Bulk live AQI + weather
 # ---------------------------------------------------------
 
 def get_bulk_environment_data(
@@ -728,32 +891,20 @@ def get_bulk_environment_data(
     ],
 ) -> list[dict[str, Any]]:
     """
-    Fetch current AQI + weather
-    for many locations.
-
-    Instead of:
-        46 cities x 2 requests
-        = 92 upstream requests
-
-    this uses:
-        1 air-quality request
-        1 weather request
-
-    Successful results are cached
-    for five minutes.
+    Many locations using only:
+    1 AQ request + 1 weather request.
     """
 
     valid_locations = [
         location
-        for location in locations
+        for location
+        in locations
         if (
             location.get(
                 "latitude"
             )
             is not None
-
             and
-
             location.get(
                 "longitude"
             )
@@ -791,12 +942,11 @@ def get_bulk_environment_data(
                 5,
             ),
         )
-        for location in valid_locations
+        for location
+        in valid_locations
     )
 
-    now = (
-        monotonic()
-    )
+    now = monotonic()
 
     cached = (
         _BULK_LIVE_CACHE.get(
@@ -855,7 +1005,6 @@ def get_bulk_environment_data(
     with httpx.Client(
         timeout=30.0
     ) as client:
-
         air_response = (
             client.get(
                 AIR_QUALITY_URL,
@@ -920,7 +1069,6 @@ def get_bulk_environment_data(
     ) in enumerate(
         valid_locations
     ):
-
         latitude = float(
             location[
                 "latitude"
@@ -934,27 +1082,19 @@ def get_bulk_environment_data(
         )
 
         air_data = (
-            air_results[
-                index
-            ]
-            if (
-                index
-                < len(
-                    air_results
-                )
+            air_results[index]
+            if index
+            < len(
+                air_results
             )
             else {}
         )
 
         weather_data = (
-            weather_results[
-                index
-            ]
-            if (
-                index
-                < len(
-                    weather_results
-                )
+            weather_results[index]
+            if index
+            < len(
+                weather_results
             )
             else {}
         )
@@ -1104,9 +1244,7 @@ def get_bulk_environment_data(
         cache_key
     ] = (
         monotonic(),
-        deepcopy(
-            results
-        ),
+        deepcopy(results),
     )
 
     return results

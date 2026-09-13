@@ -1,6 +1,11 @@
-import { useMemo, useState } from "react";
+import {
+  useMemo,
+  useState,
+} from "react";
+
 import {
   CalendarDays,
+  TrendingDown,
   TrendingUp,
 } from "lucide-react";
 
@@ -14,127 +19,388 @@ import {
   ResponsiveContainer,
 } from "recharts";
 
-import { useAQIHistory } from "../hooks/useAQIHistory";
-import { useAppContext } from "../context/AppContext";
+import {
+  useAQIHistory,
+} from "../hooks/useAQIHistory";
+
+import {
+  useAppContext,
+} from "../context/AppContext";
+
 
 function History() {
-  const { selectedZone } = useAppContext();
-  const [range, setRange] = useState("TODAY");
+  const {
+    selectedZone,
+  } = useAppContext();
 
-  const limit =
+
+  const [
+    range,
+    setRange,
+  ] = useState(
+    "TODAY"
+  );
+
+
+  const hours =
     range === "TODAY"
       ? 24
       : range === "7D"
       ? 168
-      : 168;
+      : 720;
+
 
   const {
     data,
     loading,
     error,
-  } = useAQIHistory(selectedZone, limit);
+  } = useAQIHistory(
+    selectedZone,
+    hours
+  );
 
-  const readings = useMemo(() => {
-    const rawReadings = data?.readings || [];
 
-    return [...rawReadings]
-      .reverse()
-      .map((reading) => ({
-        time: new Date(
-          reading.timestamp
-        ).toLocaleString([], {
-          month: "short",
-          day: "2-digit",
-          hour: "2-digit",
-          minute: "2-digit",
-        }),
-        aqi: reading.aqi ?? 0,
-        pm25: reading.pm25 ?? 0,
-        pm10: reading.pm10 ?? 0,
-      }));
-  }, [data]);
+  const readings =
+    useMemo(() => {
+      const rawReadings =
+        Array.isArray(
+          data?.readings
+        )
+          ? data.readings
+          : [];
+
+
+      return rawReadings
+        .filter(
+          (reading) =>
+            reading &&
+            reading.timestamp
+        )
+        .map(
+          (
+            reading,
+            index
+          ) => {
+            const date =
+              new Date(
+                reading.timestamp
+              );
+
+
+            const validDate =
+              !Number.isNaN(
+                date.getTime()
+              );
+
+
+            let displayTime =
+              reading.timestamp;
+
+
+            if (validDate) {
+              if (
+                range ===
+                "TODAY"
+              ) {
+                displayTime =
+                  date.toLocaleTimeString(
+                    [],
+                    {
+                      hour:
+                        "2-digit",
+
+                      minute:
+                        "2-digit",
+                    }
+                  );
+              } else {
+                displayTime =
+                  date.toLocaleString(
+                    [],
+                    {
+                      month:
+                        "short",
+
+                      day:
+                        "2-digit",
+
+                      hour:
+                        "2-digit",
+
+                      minute:
+                        "2-digit",
+                    }
+                  );
+              }
+            }
+
+
+            return {
+              id:
+                `${reading.timestamp}-${index}`,
+
+              timestamp:
+                reading.timestamp,
+
+              time:
+                displayTime,
+
+              aqi:
+                Number(
+                  reading.aqi ??
+                    0
+                ),
+
+              pm25:
+                Number(
+                  reading.pm25 ??
+                    0
+                ),
+
+              pm10:
+                Number(
+                  reading.pm10 ??
+                    0
+                ),
+
+              category:
+                reading.category ||
+                "UNKNOWN",
+            };
+          }
+        );
+    }, [
+      data,
+      range,
+    ]);
+
 
   const averageAQI =
-    readings.length > 0
-      ? Math.round(
-          readings.reduce(
-            (sum, item) => sum + item.aqi,
-            0
-          ) / readings.length
-        )
-      : 0;
+    useMemo(() => {
+      if (
+        readings.length ===
+        0
+      ) {
+        return 0;
+      }
+
+      const total =
+        readings.reduce(
+          (
+            sum,
+            reading
+          ) =>
+            sum +
+            reading.aqi,
+          0
+        );
+
+      return Math.round(
+        total /
+          readings.length
+      );
+    }, [
+      readings,
+    ]);
+
 
   const peakAQI =
-    readings.length > 0
-      ? Math.max(
-          ...readings.map((item) => item.aqi)
+    useMemo(() => {
+      if (
+        readings.length ===
+        0
+      ) {
+        return 0;
+      }
+
+      return Math.max(
+        ...readings.map(
+          (reading) =>
+            reading.aqi
         )
-      : 0;
+      );
+    }, [
+      readings,
+    ]);
+
 
   const pm25Peak =
-    readings.length > 0
-      ? Math.max(
-          ...readings.map((item) => item.pm25)
+    useMemo(() => {
+      if (
+        readings.length ===
+        0
+      ) {
+        return 0;
+      }
+
+      return Math.max(
+        ...readings.map(
+          (reading) =>
+            reading.pm25
         )
-      : 0;
+      );
+    }, [
+      readings,
+    ]);
+
 
   const trend =
-    readings.length >= 2
-      ? Math.round(
-          ((readings[readings.length - 1].aqi -
-            readings[0].aqi) /
-            Math.max(readings[0].aqi, 1)) *
-            100
-        )
-      : 0;
+    useMemo(() => {
+      if (
+        readings.length <
+        2
+      ) {
+        return 0;
+      }
+
+
+      const first =
+        readings[0].aqi;
+
+      const latest =
+        readings[
+          readings.length -
+            1
+        ].aqi;
+
+
+      return Math.round(
+        (
+          (
+            latest -
+            first
+          ) /
+          Math.max(
+            first,
+            1
+          )
+        ) *
+          100
+      );
+    }, [
+      readings,
+    ]);
+
+
+  /*
+   * Chart simplification:
+   *
+   * Today -> all hourly points.
+   * 7 days -> roughly every 3 hours.
+   * 30 days -> roughly every 12 hours.
+   *
+   * Full data still appears in
+   * Historical Readings table.
+   */
+  const chartReadings =
+    useMemo(() => {
+      if (
+        range === "TODAY"
+      ) {
+        return readings;
+      }
+
+
+      const step =
+        range === "7D"
+          ? 3
+          : 12;
+
+
+      return readings.filter(
+        (
+          _reading,
+          index
+        ) =>
+          index % step ===
+            0 ||
+          index ===
+            readings.length -
+              1
+      );
+    }, [
+      readings,
+      range,
+    ]);
+
+
+  const TrendIcon =
+    trend >= 0
+      ? TrendingUp
+      : TrendingDown;
+
+
+  const rangeLabel =
+    range === "TODAY"
+      ? "TODAY"
+      : range === "7D"
+      ? "7 DAYS"
+      : "30 DAYS";
+
 
   if (loading) {
     return (
-      <div>
-        <p>Loading AQI history...</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div>
+      <div className="history-page-state">
         <p>
-          History unavailable: {error}
+          Loading AQI history...
         </p>
       </div>
     );
   }
+
+
+  if (error) {
+    return (
+      <div className="history-page-state">
+        <p>
+          History unavailable:
+          {" "}
+          {error}
+        </p>
+      </div>
+    );
+  }
+
 
   return (
     <div>
       <div className="dashboard-header history-v3-header">
         <div>
           <p className="eyebrow">
-            HISTORICAL ENVIRONMENT DATA
+            HISTORICAL ENVIRONMENT
+            DATA
           </p>
 
           <h1>
             AQI
             <span className="dashboard-title-accent">
-              {" "}History
+              {" "}
+              History
             </span>
           </h1>
 
           <p>
-            Analyze pollution trends over time and
-            identify periods of elevated
+            Analyze pollution trends
+            over time and identify
+            periods of elevated
             environmental risk.
           </p>
         </div>
 
+
         <div className="history-range-control">
-          <CalendarDays size={15} />
+          <CalendarDays
+            size={15}
+          />
 
           <select
             value={range}
-            onChange={(event) =>
-              setRange(event.target.value)
+            onChange={(
+              event
+            ) =>
+              setRange(
+                event.target.value
+              )
             }
           >
             <option value="TODAY">
@@ -152,43 +418,85 @@ function History() {
         </div>
       </div>
 
+
       <div className="history-summary-grid">
         <section className="card history-summary-card">
-          <span>Average AQI</span>
-          <strong>{averageAQI}</strong>
-          <small>Selected period</small>
-        </section>
-
-        <section className="card history-summary-card">
-          <span>Peak AQI</span>
-          <strong>{peakAQI}</strong>
-          <small>Highest recorded</small>
-        </section>
-
-        <section className="card history-summary-card">
-          <span>PM2.5 Peak</span>
+          <span>
+            Average AQI
+          </span>
 
           <strong>
-            {pm25Peak}
+            {averageAQI}
           </strong>
 
-          <small>µg/m³</small>
+          <small>
+            Selected period
+          </small>
         </section>
 
-        <section className="card history-summary-card">
-          <span>Trend</span>
 
-          <strong className="history-trend">
-            <TrendingUp size={20} />
-            {trend >= 0 ? "+" : ""}
+        <section className="card history-summary-card">
+          <span>
+            Peak AQI
+          </span>
+
+          <strong>
+            {peakAQI}
+          </strong>
+
+          <small>
+            Highest recorded
+          </small>
+        </section>
+
+
+        <section className="card history-summary-card">
+          <span>
+            PM2.5 Peak
+          </span>
+
+          <strong>
+            {pm25Peak.toFixed(
+              1
+            )}
+          </strong>
+
+          <small>
+            µg/m³
+          </small>
+        </section>
+
+
+        <section className="card history-summary-card">
+          <span>
+            Trend
+          </span>
+
+          <strong
+            className={
+              trend >= 0
+                ? "history-trend trend-up"
+                : "history-trend trend-down"
+            }
+          >
+            <TrendIcon
+              size={20}
+            />
+
+            {trend >= 0
+              ? "+"
+              : ""}
+
             {trend}%
           </strong>
 
           <small>
-            First vs latest reading
+            First vs latest
+            reading
           </small>
         </section>
       </div>
+
 
       <section className="card history-area-card">
         <div className="card-header">
@@ -197,91 +505,182 @@ function History() {
               TIME SERIES
             </span>
 
-            <h2>AQI Trend</h2>
+            <h2>
+              AQI Trend
+            </h2>
           </div>
 
+
           <span className="model-pill">
-            {range}
+            {rangeLabel}
           </span>
         </div>
 
-        <div className="history-area-wrap">
-          <ResponsiveContainer
-            width="100%"
-            height={360}
+
+        {readings.length ===
+        0 ? (
+          <div
+            style={{
+              minHeight:
+                "360px",
+
+              display:
+                "flex",
+
+              alignItems:
+                "center",
+
+              justifyContent:
+                "center",
+
+              color:
+                "#849d96",
+            }}
           >
-            <AreaChart data={readings}>
-              <defs>
-                <linearGradient
-                  id="historyArea"
-                  x1="0"
-                  y1="0"
-                  x2="0"
-                  y2="1"
-                >
-                  <stop
-                    offset="5%"
-                    stopColor="#39e6b1"
-                    stopOpacity={0.38}
-                  />
+            No historical
+            readings available.
+          </div>
+        ) : (
+          <div className="history-area-wrap">
+            <ResponsiveContainer
+              width="100%"
+              height={360}
+            >
+              <AreaChart
+                data={
+                  chartReadings
+                }
+              >
+                <defs>
+                  <linearGradient
+                    id="historyArea"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
+                    <stop
+                      offset="5%"
+                      stopColor="#39e6b1"
+                      stopOpacity={
+                        0.38
+                      }
+                    />
 
-                  <stop
-                    offset="95%"
-                    stopColor="#39e6b1"
-                    stopOpacity={0}
-                  />
-                </linearGradient>
-              </defs>
+                    <stop
+                      offset="95%"
+                      stopColor="#39e6b1"
+                      stopOpacity={
+                        0
+                      }
+                    />
+                  </linearGradient>
+                </defs>
 
-              <CartesianGrid
-                stroke="rgba(255,255,255,0.05)"
-                vertical={false}
-              />
 
-              <XAxis
-                dataKey="time"
-                axisLine={false}
-                tickLine={false}
-                tick={{
-                  fill: "#849d96",
-                  fontSize: 11,
-                }}
-              />
+                <CartesianGrid
+                  stroke="rgba(255,255,255,0.05)"
+                  vertical={
+                    false
+                  }
+                />
 
-              <YAxis
-                axisLine={false}
-                tickLine={false}
-                tick={{
-                  fill: "#849d96",
-                  fontSize: 11,
-                }}
-              />
 
-              <Tooltip
-                contentStyle={{
-                  background: "#0d1c1a",
-                  border:
-                    "1px solid rgba(212,241,232,0.08)",
-                  borderRadius: "12px",
-                  color: "#ecf5f1",
-                }}
-              />
+                <XAxis
+                  dataKey="time"
+                  axisLine={
+                    false
+                  }
+                  tickLine={
+                    false
+                  }
+                  minTickGap={
+                    28
+                  }
+                  tick={{
+                    fill:
+                      "#849d96",
 
-              <Area
-                type="monotone"
-                dataKey="aqi"
-                stroke="#39e6b1"
-                strokeWidth={3}
-                fill="url(#historyArea)"
-                activeDot={{
-                  r: 6,
-                  fill: "#62dce8",
-                }}
-              />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
+                    fontSize:
+                      11,
+                  }}
+                />
+
+
+                <YAxis
+                  axisLine={
+                    false
+                  }
+                  tickLine={
+                    false
+                  }
+                  domain={[
+                    0,
+                    "auto",
+                  ]}
+                  tick={{
+                    fill:
+                      "#849d96",
+
+                    fontSize:
+                      11,
+                  }}
+                />
+
+
+                <Tooltip
+                  contentStyle={{
+                    background:
+                      "#0d1c1a",
+
+                    border:
+                      "1px solid rgba(212,241,232,0.08)",
+
+                    borderRadius:
+                      "12px",
+
+                    color:
+                      "#ecf5f1",
+                  }}
+                  labelStyle={{
+                    color:
+                      "#62dce8",
+                  }}
+                />
+
+
+                <Area
+                  type="monotone"
+                  dataKey="aqi"
+                  stroke="#39e6b1"
+                  strokeWidth={
+                    3
+                  }
+                  fill="url(#historyArea)"
+                  dot={
+                    range ===
+                    "TODAY"
+                      ? {
+                          r: 3,
+                          fill:
+                            "#39e6b1",
+                          strokeWidth:
+                            0,
+                        }
+                      : false
+                  }
+                  activeDot={{
+                    r: 6,
+                    fill:
+                      "#62dce8",
+                  }}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        )}
       </section>
+
 
       <section className="card history-table-card">
         <div className="card-header">
@@ -294,30 +693,86 @@ function History() {
               Historical Readings
             </h2>
           </div>
+
+          <span className="model-pill">
+            {readings.length}
+            {" "}
+            READINGS
+          </span>
         </div>
+
 
         <div className="table-wrapper">
           <table>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>AQI</th>
-                <th>PM2.5</th>
-                <th>PM10</th>
+                <th>
+                  Time
+                </th>
+
+                <th>
+                  AQI
+                </th>
+
+                <th>
+                  PM2.5
+                </th>
+
+                <th>
+                  PM10
+                </th>
+
+                <th>
+                  Category
+                </th>
               </tr>
             </thead>
 
+
             <tbody>
-              {readings.map(
-                (reading, index) => (
-                  <tr key={`${reading.time}-${index}`}>
-                    <td>{reading.time}</td>
-                    <td>{reading.aqi}</td>
-                    <td>{reading.pm25}</td>
-                    <td>{reading.pm10}</td>
-                  </tr>
-                )
-              )}
+              {[...readings]
+                .reverse()
+                .map(
+                  (
+                    reading
+                  ) => (
+                    <tr
+                      key={
+                        reading.id
+                      }
+                    >
+                      <td>
+                        {
+                          reading.time
+                        }
+                      </td>
+
+                      <td>
+                        {
+                          reading.aqi
+                        }
+                      </td>
+
+                      <td>
+                        {
+                          reading.pm25
+                        }
+                      </td>
+
+                      <td>
+                        {
+                          reading.pm10
+                        }
+                      </td>
+
+                      <td>
+                        {
+                          reading.category
+                        }
+                      </td>
+                    </tr>
+                  )
+                )}
             </tbody>
           </table>
         </div>
@@ -325,5 +780,6 @@ function History() {
     </div>
   );
 }
+
 
 export default History;
