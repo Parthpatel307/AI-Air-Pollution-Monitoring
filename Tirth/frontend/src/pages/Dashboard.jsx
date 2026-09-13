@@ -77,6 +77,7 @@ function getDiagnosis(aqiData) {
 function Dashboard() {
   const {
     selectedZone,
+    setSelectedZone,
   } = useAppContext();
 
   // -------------------------------------------------------
@@ -347,12 +348,10 @@ function Dashboard() {
           <div className="dashboard-main-grid">
             <div className="dashboard-main-column">
               <PollutionMap
-                zones={
-                  liveZones
-                }
-                hotspots={
-                  hotspots
-                }
+                zones={liveZones}
+                hotspots={hotspots}
+                selectedZoneId={selectedZone}
+                onZoneSelect={setSelectedZone}
               />
 
               <RiskTrajectory
