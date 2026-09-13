@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import {
   CircleMarker,
@@ -13,103 +13,95 @@ import {
 import "leaflet/dist/leaflet.css";
 
 
-const INDIA_CENTER = [
-  22.5,
-  79.0,
-];
+const INDIA_CENTER = [22.5, 79.0];
 
 
 function isValidCoordinate(item) {
   return (
     item &&
-    Number.isFinite(
-      Number(item.latitude)
-    ) &&
-    Number.isFinite(
-      Number(item.longitude)
-    )
+    Number.isFinite(Number(item.latitude)) &&
+    Number.isFinite(Number(item.longitude))
   );
 }
 
 
 function getAQIColor(aqi) {
-  const value =
-    Number(aqi);
+  const value = Number(aqi);
 
   if (!Number.isFinite(value)) {
     return "#94a3b8";
   }
 
-  if (value <= 50) {
-    return "#34d399";
-  }
+  if (value <= 50) return "#34d399";
+  if (value <= 100) return "#fbbf24";
+  if (value <= 150) return "#fb923c";
+  if (value <= 200) return "#f87171";
+  if (value <= 300) return "#a855f7";
 
-  if (value <= 100) {
-    return "#fbbf24";
-  }
-
-  if (value <= 150) {
-    return "#fb923c";
-  }
-
-  if (value <= 200) {
-    return "#f87171";
-  }
-
-  return "#ef4444";
+  return "#7f1d1d";
 }
 
 
-function ZoomWatcher({
-  onZoomChange,
-}) {
-  const map =
-    useMapEvents({
-      zoomend() {
-        onZoomChange(
-          map.getZoom()
-        );
-      },
-    });
+function ZoomWatcher({ onZoomChange }) {
+  const map = useMapEvents({
+    zoomend() {
+      onZoomChange(map.getZoom());
+    },
+  });
 
   return null;
 }
 
 
-function SelectedZoneFocus({
-  zone,
+function MapController({
+  cityTarget,
+  stateTarget,
+  onActionComplete,
 }) {
   const map = useMap();
 
-  useEffect(() => {
-    if (
-      !zone ||
-      !isValidCoordinate(zone)
-    ) {
-      return;
-    }
+  if (cityTarget) {
+    setTimeout(() => {
+      map.flyTo(
+        [
+          Number(cityTarget.latitude),
+          Number(cityTarget.longitude),
+        ],
+        10,
+        {
+          duration: 1,
+        }
+      );
 
-    map.flyTo(
-      [
-        Number(
-          zone.latitude
-        ),
-        Number(
-          zone.longitude
-        ),
-      ],
-      Math.max(
-        map.getZoom(),
-        8
-      ),
-      {
-        duration: 0.8,
+      onActionComplete?.();
+    }, 0);
+  }
+
+  if (
+    !cityTarget &&
+    stateTarget &&
+    stateTarget.length > 0
+  ) {
+    setTimeout(() => {
+      const bounds = stateTarget.map((zone) => [
+        Number(zone.latitude),
+        Number(zone.longitude),
+      ]);
+
+      if (bounds.length === 1) {
+        map.flyTo(bounds[0], 8, {
+          duration: 1,
+        });
+      } else {
+        map.fitBounds(bounds, {
+          padding: [70, 70],
+          maxZoom: 8,
+        });
       }
-    );
-  }, [
-    zone?.zone_id,
-    map,
-  ]);
+
+      onActionComplete?.();
+    }, 0);
+  }
 
   return null;
 }
@@ -121,66 +113,239 @@ function PollutionMap({
   selectedZoneId = null,
   onZoneSelect = null,
 }) {
-  const [
-    zoom,
-    setZoom,
-  ] = useState(5);
+  const [zoom, setZoom] = useState(5);
 
-  const validZones =
-    zones.filter(
-      isValidCoordinate
+  const [selectedState, setSelectedState] =
+    useState("");
+
+  const [selectedCity, setSelectedCity] =
+    useState("");
+
+  const [searchText, setSearchText] =
+    useState("");
+
+  const [cityTarget, setCityTarget] =
+    useState(null);
+
+  const [stateTarget, setStateTarget] =
+    useState(null);
+
+  const actionLock = useRef(false);
+
+  const validZones = useMemo(
+    () => zones.filter(isValidCoordinate),
+    [zones]
+  );
+
+  const validHotspots = useMemo(
+    () => hotspots.filter(isValidCoordinate),
+    [hotspots]
+  );
+
+  const states = useMemo(() => {
+    return [
+      ...new Set(
+        validZones
+          .map((zone) => zone.state)
+          .filter(Boolean)
+      ),
+    ].sort((a, b) =>
+      a.localeCompare(b)
     );
+  }, [validZones]);
 
-  const validHotspots =
-    hotspots.filter(
-      isValidCoordinate
-    );
+  const citiesForState = useMemo(() => {
+    if (!selectedState) {
+      return [];
+    }
 
-  const selectedZone =
-    validZones.find(
-      (zone) =>
-        zone.zone_id ===
-        selectedZoneId
-    ) || null;
-
-  const highestAQI =
-    Math.max(
-      ...validZones.map(
+    return validZones
+      .filter(
         (zone) =>
-          Number(
-            zone.current_aqi ??
-              zone.aqi ??
-              0
-          )
-      ),
+          zone.state === selectedState
+      )
+      .sort((a, b) =>
+        a.name.localeCompare(b.name)
+      );
+  }, [
+    selectedState,
+    validZones,
+  ]);
 
-      ...validHotspots.map(
-        (hotspot) =>
-          Number(
-            hotspot.aqi ??
-              0
-          )
-      ),
+  const searchOptions = useMemo(() => {
+    return validZones
+      .map((zone) => ({
+        ...zone,
+        searchLabel: `${zone.name}, ${zone.state}`,
+      }))
+      .sort((a, b) =>
+        a.searchLabel.localeCompare(
+          b.searchLabel
+        )
+      );
+  }, [validZones]);
 
-      0
+  const highestAQI = Math.max(
+    ...validZones.map((zone) =>
+      Number(
+        zone.current_aqi ??
+          zone.aqi ??
+          0
+      )
+    ),
+    ...validHotspots.map((hotspot) =>
+      Number(hotspot.aqi ?? 0)
+    ),
+    0
+  );
+
+  const showCities = zoom >= 6;
+  const showCityLabels = zoom >= 9;
+
+
+  function clearMapAction() {
+    actionLock.current = false;
+    setCityTarget(null);
+    setStateTarget(null);
+  }
+
+
+  function handleStateChange(event) {
+    const state =
+      event.target.value;
+
+    setSelectedState(state);
+    setSelectedCity("");
+
+    if (!state) {
+      return;
+    }
+
+    const matchingZones =
+      validZones.filter(
+        (zone) =>
+          zone.state === state
+      );
+
+    actionLock.current = true;
+
+    setCityTarget(null);
+    setStateTarget(matchingZones);
+  }
+
+
+  function selectCity(zone) {
+    if (!zone) {
+      return;
+    }
+
+    setSelectedState(
+      zone.state || ""
     );
 
-  /*
-   * State-level view:
-   * do not show dozens of labels.
-   *
-   * City markers start appearing
-   * when user manually zooms in.
-   */
-  const showCities =
-    zoom >= 6;
+    setSelectedCity(
+      zone.zone_id
+    );
 
-  /*
-   * At higher zoom show permanent
-   * city name + AQI labels.
-   */
-  const showCityLabels =
-    zoom >= 8;
+    setSearchText(
+      `${zone.name}, ${zone.state}`
+    );
+
+    onZoneSelect?.(
+      zone.zone_id
+    );
+
+    actionLock.current = true;
+
+    setStateTarget(null);
+    setCityTarget(zone);
+  }
+
+
+  function handleCityChange(event) {
+    const zoneId =
+      event.target.value;
+
+    setSelectedCity(zoneId);
+
+    const zone =
+      validZones.find(
+        (item) =>
+          item.zone_id === zoneId
+      );
+
+    if (zone) {
+      selectCity(zone);
+    }
+  }
+
+
+  function handleSearchChange(event) {
+    const value =
+      event.target.value;
+
+    setSearchText(value);
+
+    const normalized =
+      value
+        .trim()
+        .toLowerCase();
+
+    const exactMatch =
+      searchOptions.find(
+        (zone) =>
+          zone.searchLabel
+            .toLowerCase() ===
+          normalized
+      );
+
+    if (exactMatch) {
+      selectCity(
+        exactMatch
+      );
+    }
+  }
+
+
+  function handleSearchSubmit() {
+    const normalized =
+      searchText
+        .trim()
+        .toLowerCase();
+
+    if (!normalized) {
+      return;
+    }
+
+    const match =
+      searchOptions.find(
+        (zone) =>
+          zone.name
+            .toLowerCase() ===
+            normalized ||
+          zone.searchLabel
+            .toLowerCase() ===
+            normalized
+      ) ||
+      searchOptions.find(
+        (zone) =>
+          zone.name
+            .toLowerCase()
+            .includes(
+              normalized
+            ) ||
+          zone.state
+            ?.toLowerCase()
+            .includes(
+              normalized
+            )
+      );
+
+    if (match) {
+      selectCity(match);
+    }
+  }
+
 
   return (
     <section className="card geo-map-card">
@@ -197,10 +362,178 @@ function PollutionMap({
 
         <div className="geo-map-status">
           <span className="status-dot" />
-
           LIVE
         </div>
       </div>
+
+
+      {/* MAP FILTERS */}
+
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            "1fr 1fr 1.4fr",
+          gap: "12px",
+          marginBottom: "14px",
+        }}
+      >
+        <select
+          value={selectedState}
+          onChange={
+            handleStateChange
+          }
+          style={{
+            width: "100%",
+            padding: "11px 12px",
+            borderRadius: "10px",
+            border:
+              "1px solid rgba(94,234,212,.18)",
+            background: "#071713",
+            color: "#d8f5ee",
+            outline: "none",
+          }}
+        >
+          <option value="">
+            Select State
+          </option>
+
+          {states.map(
+            (state) => (
+              <option
+                key={state}
+                value={state}
+              >
+                {state}
+              </option>
+            )
+          )}
+        </select>
+
+
+        <select
+          value={selectedCity}
+          onChange={
+            handleCityChange
+          }
+          disabled={
+            !selectedState
+          }
+          style={{
+            width: "100%",
+            padding: "11px 12px",
+            borderRadius: "10px",
+            border:
+              "1px solid rgba(94,234,212,.18)",
+            background: "#071713",
+            color: "#d8f5ee",
+            outline: "none",
+            opacity:
+              selectedState
+                ? 1
+                : 0.55,
+          }}
+        >
+          <option value="">
+            Select City
+          </option>
+
+          {citiesForState.map(
+            (zone) => (
+              <option
+                key={
+                  zone.zone_id
+                }
+                value={
+                  zone.zone_id
+                }
+              >
+                {zone.name}
+              </option>
+            )
+          )}
+        </select>
+
+
+        <div
+          style={{
+            display: "flex",
+            gap: "8px",
+          }}
+        >
+          <input
+            list="pollution-city-search"
+            value={searchText}
+            onChange={
+              handleSearchChange
+            }
+            onKeyDown={(event) => {
+              if (
+                event.key ===
+                "Enter"
+              ) {
+                handleSearchSubmit();
+              }
+            }}
+            placeholder="Search city or state..."
+            style={{
+              width: "100%",
+              padding:
+                "11px 12px",
+              borderRadius:
+                "10px",
+              border:
+                "1px solid rgba(94,234,212,.18)",
+              background:
+                "#071713",
+              color:
+                "#d8f5ee",
+              outline: "none",
+            }}
+          />
+
+          <datalist id="pollution-city-search">
+            {searchOptions.map(
+              (zone) => (
+                <option
+                  key={
+                    zone.zone_id
+                  }
+                  value={
+                    zone.searchLabel
+                  }
+                />
+              )
+            )}
+          </datalist>
+
+          <button
+            type="button"
+            onClick={
+              handleSearchSubmit
+            }
+            style={{
+              padding:
+                "0 16px",
+              border: "none",
+              borderRadius:
+                "10px",
+              background:
+                "#2dd4bf",
+              color:
+                "#03201b",
+              fontWeight: 700,
+              cursor:
+                "pointer",
+            }}
+          >
+            Go
+          </button>
+        </div>
+      </div>
+
+
+      {/* MAP */}
 
       <div
         style={{
@@ -212,12 +545,10 @@ function PollutionMap({
         }}
       >
         <MapContainer
-          center={
-            INDIA_CENTER
-          }
+          center={INDIA_CENTER}
           zoom={5}
           minZoom={4}
-          maxZoom={13}
+          maxZoom={14}
           scrollWheelZoom
           doubleClickZoom
           touchZoom
@@ -226,8 +557,7 @@ function PollutionMap({
           style={{
             height: "100%",
             width: "100%",
-            background:
-              "#071713",
+            background: "#071713",
           }}
         >
           <TileLayer
@@ -241,11 +571,22 @@ function PollutionMap({
             }
           />
 
-          <SelectedZoneFocus
-            zone={
-              selectedZone
-            }
-          />
+          {(cityTarget ||
+            stateTarget) &&
+            !actionLock.current ? null : (
+              <MapController
+                cityTarget={
+                  cityTarget
+                }
+                stateTarget={
+                  stateTarget
+                }
+                onActionComplete={
+                  clearMapAction
+                }
+              />
+            )}
+
 
           {showCities &&
             validZones.map(
@@ -279,21 +620,18 @@ function PollutionMap({
                     ]}
                     radius={
                       selected
-                        ? 14
-                        : 10
+                        ? 13
+                        : 9
                     }
                     pathOptions={{
                       color:
                         selected
                           ? "#ffffff"
                           : color,
-
                       fillColor:
                         color,
-
                       fillOpacity:
                         0.9,
-
                       weight:
                         selected
                           ? 4
@@ -301,13 +639,9 @@ function PollutionMap({
                     }}
                     eventHandlers={{
                       click() {
-                        if (
-                          onZoneSelect
-                        ) {
-                          onZoneSelect(
-                            zone.zone_id
-                          );
-                        }
+                        selectCity(
+                          zone
+                        );
                       },
                     }}
                   >
@@ -322,62 +656,61 @@ function PollutionMap({
                       ]}
                       opacity={0.95}
                     >
-                      <div
-                        style={{
-                          minWidth:
-                            "95px",
-                        }}
-                      >
-                        <strong>
-                          {zone.name}
-                        </strong>
+                      <strong>
+                        {zone.name}
+                      </strong>
 
-                        <br />
+                      <br />
 
-                        AQI:{" "}
-                        <strong>
-                          {aqi ??
-                            "--"}
-                        </strong>
-                      </div>
+                      {zone.state}
+
+                      <br />
+
+                      AQI:{" "}
+                      <strong>
+                        {aqi ?? "--"}
+                      </strong>
                     </Tooltip>
 
                     <Popup>
-                      <div>
-                        <strong>
-                          {zone.name}
-                        </strong>
+                      <strong>
+                        {zone.name}
+                      </strong>
 
-                        <br />
+                      <br />
 
-                        Live AQI:{" "}
-                        {aqi ??
-                          "Unavailable"}
+                      {zone.state}
 
-                        <br />
+                      <br />
 
-                        PM2.5:{" "}
-                        {zone.pm25 ??
-                          "--"}
+                      Live AQI:{" "}
+                      {aqi ??
+                        "Unavailable"}
 
-                        <br />
+                      <br />
 
-                        PM10:{" "}
-                        {zone.pm10 ??
-                          "--"}
+                      PM2.5:{" "}
+                      {zone.pm25 ??
+                        "--"}
 
-                        <br />
+                      <br />
 
-                        Temperature:{" "}
-                        {zone.temperature ??
-                          "--"}
-                        °C
-                      </div>
+                      PM10:{" "}
+                      {zone.pm10 ??
+                        "--"}
+
+                      <br />
+
+                      Temperature:{" "}
+                      {zone.temperature ??
+                        "--"}
+                      °C
                     </Popup>
                   </CircleMarker>
                 );
               }
             )}
+
 
           {showCities &&
             validHotspots.map(
@@ -394,7 +727,7 @@ function PollutionMap({
                       hotspot.longitude
                     ),
                   ]}
-                  radius={12}
+                  radius={11}
                   pathOptions={{
                     color:
                       "#ffffff",
@@ -406,26 +739,13 @@ function PollutionMap({
                   }}
                 >
                   <Tooltip>
-                    Hotspot AQI:{" "}
-                    {hotspot.aqi ??
-                      "--"}
+                    Pollution Hotspot
                   </Tooltip>
-
-                  <Popup>
-                    <strong>
-                      Pollution Hotspot
-                    </strong>
-
-                    <br />
-
-                    AQI:{" "}
-                    {hotspot.aqi ??
-                      "--"}
-                  </Popup>
                 </CircleMarker>
               )
             )}
         </MapContainer>
+
 
         <div
           style={{
@@ -434,9 +754,9 @@ function PollutionMap({
             top: "15px",
             left: "55px",
             background:
-              "rgba(4, 24, 20, 0.90)",
+              "rgba(4,24,20,.90)",
             border:
-              "1px solid rgba(94, 234, 212, 0.18)",
+              "1px solid rgba(94,234,212,.18)",
             borderRadius:
               "10px",
             padding:
@@ -454,6 +774,7 @@ function PollutionMap({
           Zoom {zoom}
         </div>
 
+
         <div
           style={{
             position: "absolute",
@@ -461,9 +782,9 @@ function PollutionMap({
             top: "15px",
             right: "15px",
             background:
-              "rgba(4, 24, 20, 0.90)",
+              "rgba(4,24,20,.90)",
             border:
-              "1px solid rgba(94, 234, 212, 0.18)",
+              "1px solid rgba(94,234,212,.18)",
             borderRadius:
               "10px",
             padding:
@@ -477,9 +798,9 @@ function PollutionMap({
           }}
         >
           {validZones.length}
-          {" "}
-          monitored cities
+          {" monitored cities"}
         </div>
+
 
         {!showCities && (
           <div
@@ -487,15 +808,14 @@ function PollutionMap({
               position:
                 "absolute",
               zIndex: 1000,
-              bottom:
-                "20px",
+              bottom: "20px",
               left: "50%",
               transform:
                 "translateX(-50%)",
               background:
-                "rgba(4, 24, 20, 0.92)",
+                "rgba(4,24,20,.92)",
               border:
-                "1px solid rgba(94, 234, 212, 0.18)",
+                "1px solid rgba(94,234,212,.18)",
               borderRadius:
                 "10px",
               padding:
@@ -508,10 +828,11 @@ function PollutionMap({
                 "12px",
             }}
           >
-            Zoom in to view live city AQI
+            Select a state or zoom in to view cities
           </div>
         )}
       </div>
+
 
       <div className="geo-map-summary">
         <div>
@@ -526,11 +847,11 @@ function PollutionMap({
 
         <div>
           <span>
-            Active Hotspots
+            States / UTs
           </span>
 
           <strong>
-            {validHotspots.length}
+            {states.length}
           </strong>
         </div>
 

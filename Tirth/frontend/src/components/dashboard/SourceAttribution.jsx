@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { detectPollutionSource } from "../../services/aiService";
 
+
 function getErrorMessage(error) {
   const value = error?.message ?? error;
 
@@ -16,19 +17,193 @@ function getErrorMessage(error) {
     return value.error.message;
   }
 
+  if (value?.detail) {
+    if (typeof value.detail === "string") {
+      return value.detail;
+    }
+
+    try {
+      return JSON.stringify(value.detail);
+    } catch {
+      return "Source detection failed.";
+    }
+  }
+
   return "Source detection failed.";
 }
+
+
+function getSourceLabel(source) {
+  if (
+    source === null ||
+    source === undefined
+  ) {
+    return "UNKNOWN";
+  }
+
+  if (typeof source === "string") {
+    return source;
+  }
+
+  if (typeof source === "number") {
+    return String(source);
+  }
+
+  if (typeof source === "object") {
+    const possibleLabel =
+      source.label ??
+      source.name ??
+      source.source_name ??
+      source.source_type ??
+      source.category ??
+      source.class_name ??
+      source.class ??
+      source.type ??
+      source.value;
+
+    if (
+      possibleLabel !== undefined &&
+      possibleLabel !== null
+    ) {
+      if (
+        typeof possibleLabel === "object"
+      ) {
+        return getSourceLabel(
+          possibleLabel
+        );
+      }
+
+      return String(
+        possibleLabel
+      );
+    }
+
+    const values =
+      Object.values(source);
+
+    const firstText =
+      values.find(
+        (value) =>
+          typeof value === "string"
+      );
+
+    if (firstText) {
+      return firstText;
+    }
+  }
+
+  return "UNKNOWN";
+}
+
+
+function formatSourceLabel(source) {
+  return getSourceLabel(source)
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .trim()
+    .toUpperCase();
+}
+
+
+function getConfidencePercentage(value) {
+  const number =
+    Number(value);
+
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+
+  // Backend may return:
+  // 0.61  -> 61%
+  // or
+  // 61    -> 61%
+  const percentage =
+    number <= 1
+      ? number * 100
+      : number;
+
+  return Math.max(
+    0,
+    Math.min(
+      100,
+      Math.round(percentage)
+    )
+  );
+}
+
+
+function normalizeSources(data) {
+  const probableSources =
+    data?.probable_sources ??
+    data?.sources ??
+    [];
+
+  if (
+    Array.isArray(probableSources)
+  ) {
+    return probableSources;
+  }
+
+  /*
+   * Also support object format:
+   *
+   * {
+   *   traffic: 0.61,
+   *   industrial: 0.22
+   * }
+   */
+  if (
+    probableSources &&
+    typeof probableSources ===
+      "object"
+  ) {
+    return Object.entries(
+      probableSources
+    ).map(
+      ([source, confidence]) => ({
+        source,
+        confidence:
+          typeof confidence ===
+          "object"
+            ? confidence
+                ?.confidence ??
+              confidence
+                ?.probability ??
+              confidence
+                ?.score ??
+              0
+            : confidence,
+      })
+    );
+  }
+
+  return [];
+}
+
 
 function SourceAttribution({
   zoneId = "zone_001",
   aqiData = null,
 }) {
-  const [sources, setSources] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [
+    sources,
+    setSources,
+  ] = useState([]);
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(false);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
 
   useEffect(() => {
     let cancelled = false;
+
 
     async function loadSourceDetection() {
       if (!zoneId) {
@@ -38,52 +213,83 @@ function SourceAttribution({
       setLoading(true);
       setError("");
 
+
       try {
-        const response = await detectPollutionSource({
-          zoneId,
-          pollutants: {
-            pm25: Number(aqiData?.pm25 ?? 0),
-            pm10: Number(aqiData?.pm10 ?? 0),
-            no2: Number(aqiData?.no2 ?? 0),
-            so2: Number(aqiData?.so2 ?? 0),
-            co: Number(aqiData?.co ?? 0),
-          },
-          weather: {
-            temperature: Number(
-              aqiData?.temperature ?? 0
-            ),
-            humidity: Number(
-              aqiData?.humidity ?? 0
-            ),
-            wind_speed: Number(
-              aqiData?.wind_speed ?? 0
-            ),
-          },
-        });
+        const response =
+          await detectPollutionSource({
+            zoneId,
+
+            pollutants: {
+              pm25: Number(
+                aqiData?.pm25 ?? 0
+              ),
+
+              pm10: Number(
+                aqiData?.pm10 ?? 0
+              ),
+
+              no2: Number(
+                aqiData?.no2 ?? 0
+              ),
+
+              so2: Number(
+                aqiData?.so2 ?? 0
+              ),
+
+              co: Number(
+                aqiData?.co ?? 0
+              ),
+            },
+
+            weather: {
+              temperature: Number(
+                aqiData?.temperature ??
+                  0
+              ),
+
+              humidity: Number(
+                aqiData?.humidity ??
+                  0
+              ),
+
+              wind_speed: Number(
+                aqiData?.wind_speed ??
+                  0
+              ),
+            },
+          });
+
 
         if (cancelled) {
           return;
         }
 
-        const data = response?.data || response;
+
+        const data =
+          response?.data ??
+          response;
+
 
         setSources(
-          Array.isArray(data?.probable_sources)
-            ? data.probable_sources
-            : []
+          normalizeSources(data)
         );
       } catch (err) {
         if (cancelled) {
           return;
         }
 
+
         console.error(
           "Source detection failed:",
           err
         );
 
+
         setSources([]);
-        setError(getErrorMessage(err));
+
+        setError(
+          getErrorMessage(err)
+        );
       } finally {
         if (!cancelled) {
           setLoading(false);
@@ -91,7 +297,9 @@ function SourceAttribution({
       }
     }
 
+
     loadSourceDetection();
+
 
     return () => {
       cancelled = true;
@@ -108,6 +316,7 @@ function SourceAttribution({
     aqiData?.wind_speed,
   ]);
 
+
   return (
     <section className="card source-card">
       <div className="card-header">
@@ -116,65 +325,94 @@ function SourceAttribution({
             PROBABLE SOURCE ANALYSIS
           </span>
 
-          <h2>Source Attribution</h2>
+          <h2>
+            Source Attribution
+          </h2>
         </div>
 
+
         <span className="ai-pill">
-          {loading ? "..." : "AI"}
+          {loading
+            ? "..."
+            : "AI"}
         </span>
       </div>
 
+
       {loading ? (
-        <p>Running pollution source model...</p>
+        <p>
+          Running pollution source
+          model...
+        </p>
       ) : error ? (
         <p>{error}</p>
       ) : sources.length === 0 ? (
-        <p>No source attribution available.</p>
+        <p>
+          No source attribution
+          available.
+        </p>
       ) : (
         <div className="source-list">
-          {sources.map((item) => {
-            const confidence =
-              Number(item.confidence) || 0;
+          {sources.map(
+            (item, index) => {
+              const label =
+                formatSourceLabel(
+                  item?.source ??
+                    item?.label ??
+                    item?.name ??
+                    item
+                );
 
-            const percentage = Math.round(
-              confidence * 100
-            );
 
-            return (
-              <div
-                className="source-item"
-                key={item.source}
-              >
-                <div className="source-heading">
-                  <span>
-                    {String(item.source)
-                      .replaceAll("_", " ")}
-                  </span>
+              const percentage =
+                getConfidencePercentage(
+                  item?.confidence ??
+                    item?.probability ??
+                    item?.score ??
+                    0
+                );
 
-                  <strong>
-                    {percentage}%
-                  </strong>
+
+              return (
+                <div
+                  className="source-item"
+                  key={`${label}-${index}`}
+                >
+                  <div className="source-heading">
+                    <span>
+                      {label}
+                    </span>
+
+                    <strong>
+                      {percentage}%
+                    </strong>
+                  </div>
+
+
+                  <div className="source-track">
+                    <div
+                      className="source-progress"
+                      style={{
+                        width:
+                          `${percentage}%`,
+                      }}
+                    />
+                  </div>
                 </div>
-
-                <div className="source-track">
-                  <div
-                    className="source-progress"
-                    style={{
-                      width: `${percentage}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            );
-          })}
+              );
+            }
+          )}
         </div>
       )}
 
+
       <div className="analysis-warning">
-        Probabilistic attribution — not definitive evidence.
+        Probabilistic attribution —
+        not definitive evidence.
       </div>
     </section>
   );
 }
+
 
 export default SourceAttribution;

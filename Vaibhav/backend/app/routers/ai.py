@@ -404,11 +404,12 @@ def _get_live_ai_context(
         # Fallback: existing Firestore AQI data
         # -------------------------------------------------
 
-        reading = (
-            _get_latest_aqi_reading(
+        try:
+            reading = _get_live_ai_context(
                 zone_id
             )
-        )
+        except Exception:
+            reading = {}
 
         timestamp = reading.get(
             "timestamp"
@@ -651,11 +652,7 @@ def ai_source_detection(
     ):
         weather = {}
 
-    reading = (
-        _get_latest_aqi_reading(
-            zone_id
-        )
-    )
+    reading = _get_live_ai_context(zone_id)
 
     source_input = {
         "zone_id": zone_id,

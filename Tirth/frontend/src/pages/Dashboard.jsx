@@ -80,6 +80,7 @@ function Dashboard() {
     setSelectedZone,
   } = useAppContext();
 
+
   // -------------------------------------------------------
   // Selected zone live data
   // -------------------------------------------------------
@@ -92,9 +93,9 @@ function Dashboard() {
     selectedZone
   );
 
+
   // -------------------------------------------------------
   // ALL zones live data
-  // Ahmedabad, Gandhinagar, Vadodara, etc.
   // -------------------------------------------------------
 
   const {
@@ -103,7 +104,7 @@ function Dashboard() {
     error: zonesError,
   } = useZones();
 
-  // Only use zones that successfully received live data.
+
   const liveZones = (
     allZones || []
   ).filter(
@@ -112,6 +113,7 @@ function Dashboard() {
       zone.aqi !== null &&
       zone.aqi !== undefined
   );
+
 
   // -------------------------------------------------------
   // Forecast
@@ -126,42 +128,64 @@ function Dashboard() {
     24
   );
 
+
   // -------------------------------------------------------
-  // Hotspots
+  // Existing hotspot API data
+  // Used mainly for map hotspot markers
   // -------------------------------------------------------
 
   const {
     hotspots,
-    loading: hotspotsLoading,
-    error: hotspotsError,
   } = useHotspots(
     selectedZone
   );
 
+
   const currentAQI =
     apiAQI || null;
+
 
   const hasLiveData =
     Boolean(currentAQI);
 
+
   const forecast =
     forecastData?.forecast || [];
+
 
   const latestForecast =
     forecast.length > 0
       ? forecast[0]
       : null;
 
+
+  // -------------------------------------------------------
+  // LIVE PRIMARY HOTSPOT
+  // Highest current AQI city in the live monitoring network
+  // -------------------------------------------------------
+
   const primaryHotspot =
-    hotspots?.length > 0
-      ? hotspots[0]
+    liveZones.length > 0
+      ? [...liveZones]
+          .filter(
+            (zone) =>
+              zone.aqi !== null &&
+              zone.aqi !== undefined
+          )
+          .sort(
+            (a, b) =>
+              Number(b.aqi ?? 0) -
+              Number(a.aqi ?? 0)
+          )[0] ?? null
       : null;
+
 
   const liveTimestamp =
     currentAQI?.air_quality_timestamp ??
     currentAQI?.weather_timestamp ??
     currentAQI?.timestamp ??
     null;
+
 
   const formattedTime =
     liveTimestamp
@@ -178,13 +202,20 @@ function Dashboard() {
       ? "SYNCING..."
       : "--";
 
+
   const diagnosis =
     getDiagnosis(
       currentAQI
     );
 
+
   return (
     <div>
+
+      {/* -------------------------------------------------- */}
+      {/* HEADER */}
+      {/* -------------------------------------------------- */}
+
       <div className="dashboard-header dashboard-v2-header">
         <div>
           <p className="eyebrow">
@@ -210,6 +241,7 @@ function Dashboard() {
           </p>
         </div>
 
+
         <div className="dashboard-header-actions">
           <div
             className={
@@ -232,6 +264,7 @@ function Dashboard() {
               : "CONNECTING"}
           </div>
 
+
           <div className="dashboard-time">
             <span>
               LAST UPDATED
@@ -244,6 +277,11 @@ function Dashboard() {
         </div>
       </div>
 
+
+      {/* -------------------------------------------------- */}
+      {/* AQI LOADING / ERROR */}
+      {/* -------------------------------------------------- */}
+
       {!hasLiveData &&
         loading && (
           <div className="card">
@@ -251,6 +289,7 @@ function Dashboard() {
             air-quality data...
           </div>
         )}
+
 
       {!hasLiveData &&
         error && (
@@ -261,9 +300,18 @@ function Dashboard() {
           </div>
         )}
 
+
+      {/* -------------------------------------------------- */}
+      {/* DASHBOARD */}
+      {/* -------------------------------------------------- */}
+
       {hasLiveData && (
         <>
+
+          {/* TOP STATS */}
+
           <div className="dashboard-stat-row">
+
             <AQICard
               aqi={
                 currentAQI.aqi
@@ -276,6 +324,7 @@ function Dashboard() {
               }
             />
 
+
             <PM25Card
               pm25={
                 currentAQI.pm25
@@ -284,6 +333,7 @@ function Dashboard() {
                 currentAQI.pm10
               }
             />
+
 
             <WeatherContext
               temperature={
@@ -296,6 +346,7 @@ function Dashboard() {
                 currentAQI.wind_speed
               }
             />
+
 
             <ForecastRiskCard
               predictedAQI={
@@ -314,13 +365,18 @@ function Dashboard() {
                 null
               }
             />
+
           </div>
+
+
+          {/* FORECAST STATUS */}
 
           {forecastLoading && (
             <p>
               Loading forecast...
             </p>
           )}
+
 
           {forecastError && (
             <p>
@@ -330,12 +386,16 @@ function Dashboard() {
             </p>
           )}
 
+
+          {/* ZONE STATUS */}
+
           {zonesLoading && (
             <p>
               Loading live zone
               network...
             </p>
           )}
+
 
           {zonesError && (
             <p>
@@ -345,14 +405,30 @@ function Dashboard() {
             </p>
           )}
 
+
+          {/* ------------------------------------------------ */}
+          {/* MAIN GRID */}
+          {/* ------------------------------------------------ */}
+
           <div className="dashboard-main-grid">
+
             <div className="dashboard-main-column">
+
+              {/* LIVE MAP */}
+
               <PollutionMap
                 zones={liveZones}
                 hotspots={hotspots}
-                selectedZoneId={selectedZone}
-                onZoneSelect={setSelectedZone}
+                selectedZoneId={
+                  selectedZone
+                }
+                onZoneSelect={
+                  setSelectedZone
+                }
               />
+
+
+              {/* FORECAST TRAJECTORY */}
 
               <RiskTrajectory
                 forecast={
@@ -360,37 +436,65 @@ function Dashboard() {
                 }
               />
 
+
+              {/* HOTSPOT + RISK CLUSTERS */}
+
               <div className="dashboard-two-column">
+
                 {primaryHotspot ? (
                   <HotspotCard
+
                     hotspotId={
-                      primaryHotspot.hotspot_id
+                      primaryHotspot.name ||
+                      primaryHotspot.zone_id
                     }
+
                     latitude={
                       primaryHotspot.latitude
                     }
+
                     longitude={
                       primaryHotspot.longitude
                     }
+
                     severity={
-                      primaryHotspot.severity
+                      primaryHotspot.category ??
+                      primaryHotspot.risk_level ??
+                      "UNKNOWN"
                     }
+
                     aqi={
                       primaryHotspot.aqi
                     }
-                    pollutants={
-                      []
-                    }
+
+                    pollutants={[
+                      `PM2.5: ${
+                        primaryHotspot.pm25 ??
+                        "--"
+                      }`,
+
+                      `PM10: ${
+                        primaryHotspot.pm10 ??
+                        "--"
+                      }`,
+
+                      `NO2: ${
+                        primaryHotspot.no2 ??
+                        "--"
+                      }`,
+
+                      `SO2: ${
+                        primaryHotspot.so2 ??
+                        "--"
+                      }`,
+                    ]}
                   />
                 ) : (
                   <div className="card">
-                    {hotspotsLoading
-                      ? "Loading hotspots..."
-                      : hotspotsError
-                      ? `Hotspot error: ${hotspotsError}`
-                      : "No hotspots found."}
+                    No live hotspot data available.
                   </div>
                 )}
+
 
                 <RiskClusters
                   clusters={
@@ -401,6 +505,9 @@ function Dashboard() {
 
                         name:
                           zone.name,
+
+                        state:
+                          zone.state,
 
                         risk_level:
                           zone.category ??
@@ -413,15 +520,24 @@ function Dashboard() {
                     )
                   }
                 />
+
               </div>
+
             </div>
 
+
+            {/* ------------------------------------------------ */}
+            {/* RIGHT SIDE */}
+            {/* ------------------------------------------------ */}
+
             <div className="dashboard-side-column">
+
               <HealthAdvisory
                 category={
                   currentAQI.category
                 }
               />
+
 
               <SourceAttribution
                 zoneId={
@@ -432,6 +548,7 @@ function Dashboard() {
                 }
               />
 
+
               <AIDiagnosis
                 summary={
                   diagnosis.summary
@@ -441,6 +558,7 @@ function Dashboard() {
                 }
               />
 
+
               <ForecastExplanation
                 zoneId={
                   selectedZone
@@ -449,18 +567,30 @@ function Dashboard() {
                   forecast
                 }
               />
+
             </div>
+
           </div>
 
+
+          {/* ------------------------------------------------ */}
+          {/* AI SECTION */}
+          {/* ------------------------------------------------ */}
+
           <div className="dashboard-ai-grid">
+
             <AIAnalysis />
 
             <AIChat />
+
           </div>
+
         </>
       )}
+
     </div>
   );
 }
+
 
 export default Dashboard;

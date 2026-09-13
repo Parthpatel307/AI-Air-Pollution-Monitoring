@@ -8,6 +8,7 @@ class ZoneCreate(BaseModel):
     longitude: float
     current_aqi: float
     risk_level: str
+    state: str | None = None
 
 
 class ZoneResponse(BaseModel):
@@ -17,3 +18,4 @@ class ZoneResponse(BaseModel):
     longitude: float
     current_aqi: float
     risk_level: str
+    state: str | None = None

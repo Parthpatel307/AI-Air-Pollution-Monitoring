@@ -1,8 +1,74 @@
 import { auth } from "../config/firebase";
 
+
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL ||
   "http://localhost:8000/api/v1";
+
+
+function getApiErrorMessage(
+  result,
+  status
+) {
+  if (!result) {
+    return `Request failed (${status})`;
+  }
+
+  if (
+    typeof result === "string"
+  ) {
+    return result;
+  }
+
+  if (
+    typeof result?.detail ===
+    "string"
+  ) {
+    return result.detail;
+  }
+
+  if (
+    result?.detail?.error?.message
+  ) {
+    return String(
+      result.detail.error.message
+    );
+  }
+
+  if (
+    result?.detail?.message
+  ) {
+    return String(
+      result.detail.message
+    );
+  }
+
+  if (
+    result?.error?.message
+  ) {
+    return String(
+      result.error.message
+    );
+  }
+
+  if (
+    typeof result?.message ===
+    "string"
+  ) {
+    return result.message;
+  }
+
+  try {
+    return JSON.stringify(
+      result.detail ??
+        result.error ??
+        result
+    );
+  } catch {
+    return `Request failed (${status})`;
+  }
+}
+
 
 export async function apiRequest(
   endpoint,
@@ -11,12 +77,16 @@ export async function apiRequest(
   const firebaseUser =
     auth.currentUser;
 
-  const token = firebaseUser
-    ? await firebaseUser.getIdToken()
-    : null;
+
+  const token =
+    firebaseUser
+      ? await firebaseUser.getIdToken()
+      : null;
+
 
   const isFormData =
     options.body instanceof FormData;
+
 
   const headers = {
     ...(!isFormData
@@ -36,7 +106,9 @@ export async function apiRequest(
     ...(options.headers || {}),
   };
 
+
   let response;
+
 
   try {
     response = await fetch(
@@ -57,12 +129,15 @@ export async function apiRequest(
     );
   }
 
+
   let result = null;
+
 
   const contentType =
     response.headers.get(
       "content-type"
     ) || "";
+
 
   try {
     if (
@@ -80,29 +155,54 @@ export async function apiRequest(
     result = null;
   }
 
-  if (response.status === 401) {
+
+  if (
+    response.status === 401
+  ) {
     throw new Error(
       "Your authentication session is invalid or expired."
     );
   }
 
-  if (response.status === 403) {
+
+  if (
+    response.status === 403
+  ) {
     throw new Error(
       "You do not have permission to perform this action."
     );
   }
 
+
   if (!response.ok) {
+    const message =
+      getApiErrorMessage(
+        result,
+        response.status
+      );
+
+    console.error(
+      "API request failed:",
+      {
+        endpoint,
+        status:
+          response.status,
+        result,
+      }
+    );
+
     throw new Error(
-      result?.detail ||
-        result?.error?.message ||
-        result?.message ||
-        `Request failed (${response.status})`
+      message
     );
   }
 
-  return result?.data ?? result;
+
+  return (
+    result?.data ??
+    result
+  );
 }
+
 
 export function apiGet(
   endpoint,
@@ -116,6 +216,7 @@ export function apiGet(
     }
   );
 }
+
 
 export function apiPost(
   endpoint,
@@ -137,6 +238,7 @@ export function apiPost(
   );
 }
 
+
 export function apiPut(
   endpoint,
   body,
@@ -157,6 +259,7 @@ export function apiPut(
   );
 }
 
+
 export function apiPatch(
   endpoint,
   body,
@@ -176,6 +279,7 @@ export function apiPatch(
     }
   );
 }
+
 
 export function apiDelete(
   endpoint,
