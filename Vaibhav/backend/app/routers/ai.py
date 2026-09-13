@@ -8,6 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.database import get_firestore
 from app.dependencies import require_roles
+from app.integrations.open_meteo import (
+    get_live_environment_data,
+)
 
 
 router = APIRouter(
@@ -24,15 +27,15 @@ REPO_ROOT = Path(__file__).resolve().parents[4]
 PARTH_AI_ML_PATH = REPO_ROOT / "Parth" / "ai-ml"
 
 if str(PARTH_AI_ML_PATH) not in sys.path:
-    sys.path.insert(0, str(PARTH_AI_ML_PATH))
+    sys.path.insert(
+        0,
+        str(PARTH_AI_ML_PATH),
+    )
 
 
 def _load_parth_integrations():
     """
     Lazy-load Parth AI/ML public integration functions.
-
-    Lazy import keeps backend startup safe even when an optional
-    AI dependency is unavailable.
     """
 
     try:
@@ -71,9 +74,40 @@ def _load_parth_integrations():
         ) from exc
 
 
-def _get_latest_aqi_reading(
+# ---------------------------------------------------------
+# Common helpers
+# ---------------------------------------------------------
+
+def _number(
+    data: dict[str, Any],
+    key: str,
+    default: float = 0.0,
+) -> float:
+    value = data.get(
+        key,
+        default,
+    )
+
+    if value is None:
+        return default
+
+    try:
+        return float(value)
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return default
+
+
+def _get_zone(
     zone_id: str,
 ) -> dict[str, Any]:
+    """
+    Load zone information from Firestore.
+    """
+
     db = get_firestore()
 
     zone_document = (
@@ -96,9 +130,36 @@ def _get_latest_aqi_reading(
             },
         )
 
+    zone = (
+        zone_document.to_dict()
+        or {}
+    )
+
+    zone["zone_id"] = zone_id
+
+    return zone
+
+
+def _get_latest_aqi_reading(
+    zone_id: str,
+) -> dict[str, Any]:
+    """
+    Load latest stored Firestore AQI reading.
+    """
+
+    _get_zone(
+        zone_id
+    )
+
+    db = get_firestore()
+
     documents = (
         db.collection("aqi_readings")
-        .where("zone_id", "==", zone_id)
+        .where(
+            "zone_id",
+            "==",
+            zone_id,
+        )
         .order_by(
             "timestamp",
             direction="DESCENDING",
@@ -107,7 +168,9 @@ def _get_latest_aqi_reading(
         .stream()
     )
 
-    readings = list(documents)
+    readings = list(
+        documents
+    )
 
     if not readings:
         raise HTTPException(
@@ -117,30 +180,349 @@ def _get_latest_aqi_reading(
                 "error": {
                     "code": "AQI_DATA_NOT_FOUND",
                     "message": (
-                        f"No AQI data found for zone "
+                        "No AQI data found for zone "
                         f"'{zone_id}'."
                     ),
                 },
             },
         )
 
-    return readings[0].to_dict()
+    return (
+        readings[0].to_dict()
+        or {}
+    )
 
 
-def _number(
-    data: dict[str, Any],
-    key: str,
-    default: float = 0.0,
-) -> float:
-    value = data.get(key, default)
+def _get_live_ai_context(
+    zone_id: str,
+) -> dict[str, Any]:
+    """
+    Get live/current air-quality + weather data.
 
-    if value is None:
-        return default
+    Open-Meteo is the primary source.
+    Firestore is used as a fallback if live data
+    is temporarily unavailable.
+    """
+
+    zone = _get_zone(
+        zone_id
+    )
+
+    latitude = zone.get(
+        "latitude"
+    )
+
+    longitude = zone.get(
+        "longitude"
+    )
+
+    if (
+        latitude is None
+        or longitude is None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "ZONE_COORDINATES_MISSING",
+                    "message": (
+                        "Latitude and longitude are "
+                        "required for live AI data."
+                    ),
+                },
+            },
+        )
 
     try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+        latitude = float(
+            latitude
+        )
+
+        longitude = float(
+            longitude
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "INVALID_ZONE_COORDINATES",
+                    "message": (
+                        "Zone latitude or longitude "
+                        "is invalid."
+                    ),
+                },
+            },
+        ) from exc
+
+    # -----------------------------------------------------
+    # Primary source: Open-Meteo
+    # -----------------------------------------------------
+
+    try:
+        live_data = (
+            get_live_environment_data(
+                latitude=latitude,
+                longitude=longitude,
+            )
+        )
+
+        air_quality = (
+            live_data.get(
+                "air_quality"
+            )
+            or {}
+        )
+
+        weather = (
+            live_data.get(
+                "weather"
+            )
+            or {}
+        )
+
+        return {
+            "zone_id": zone_id,
+
+            "zone_name": str(
+                zone.get(
+                    "name",
+                    zone_id,
+                )
+            ),
+
+            "latitude": latitude,
+            "longitude": longitude,
+
+            "data_source": (
+                "open_meteo_live"
+            ),
+
+            "aqi": _number(
+                air_quality,
+                "aqi",
+            ),
+
+            "category": str(
+                air_quality.get(
+                    "category",
+                    "UNKNOWN",
+                )
+            ),
+
+            "pm25": _number(
+                air_quality,
+                "pm25",
+            ),
+
+            "pm10": _number(
+                air_quality,
+                "pm10",
+            ),
+
+            "no2": _number(
+                air_quality,
+                "no2",
+            ),
+
+            "so2": _number(
+                air_quality,
+                "so2",
+            ),
+
+            "co": _number(
+                air_quality,
+                "co",
+            ),
+
+            "o3": _number(
+                air_quality,
+                "o3",
+            ),
+
+            "temperature": _number(
+                weather,
+                "temperature",
+            ),
+
+            "humidity": _number(
+                weather,
+                "humidity",
+            ),
+
+            "wind_speed": _number(
+                weather,
+                "wind_speed",
+            ),
+
+            "wind_direction": _number(
+                weather,
+                "wind_direction",
+            ),
+
+            "feels_like": _number(
+                weather,
+                "feels_like",
+            ),
+
+            "cloud_cover": _number(
+                weather,
+                "cloud_cover",
+            ),
+
+            "risk_level": str(
+                zone.get(
+                    "risk_level",
+                    "UNKNOWN",
+                )
+            ),
+
+            "air_quality_timestamp": (
+                air_quality.get(
+                    "timestamp"
+                )
+            ),
+
+            "weather_timestamp": (
+                weather.get(
+                    "timestamp"
+                )
+            ),
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception:
+        # -------------------------------------------------
+        # Fallback: existing Firestore AQI data
+        # -------------------------------------------------
+
+        reading = (
+            _get_latest_aqi_reading(
+                zone_id
+            )
+        )
+
+        timestamp = reading.get(
+            "timestamp"
+        )
+
+        if timestamp is not None:
+            timestamp = str(
+                timestamp
+            )
+
+        return {
+            "zone_id": zone_id,
+
+            "zone_name": str(
+                zone.get(
+                    "name",
+                    zone_id,
+                )
+            ),
+
+            "latitude": latitude,
+            "longitude": longitude,
+
+            "data_source": (
+                "firestore_fallback"
+            ),
+
+            "aqi": _number(
+                reading,
+                "aqi",
+            ),
+
+            "category": str(
+                reading.get(
+                    "category",
+                    "UNKNOWN",
+                )
+            ),
+
+            "pm25": _number(
+                reading,
+                "pm25",
+            ),
+
+            "pm10": _number(
+                reading,
+                "pm10",
+            ),
+
+            "no2": _number(
+                reading,
+                "no2",
+            ),
+
+            "so2": _number(
+                reading,
+                "so2",
+            ),
+
+            "co": _number(
+                reading,
+                "co",
+            ),
+
+            "o3": _number(
+                reading,
+                "o3",
+            ),
+
+            "temperature": _number(
+                reading,
+                "temperature",
+            ),
+
+            "humidity": _number(
+                reading,
+                "humidity",
+            ),
+
+            "wind_speed": _number(
+                reading,
+                "wind_speed",
+            ),
+
+            "wind_direction": _number(
+                reading,
+                "wind_direction",
+            ),
+
+            "feels_like": _number(
+                reading,
+                "temperature",
+            ),
+
+            "cloud_cover": _number(
+                reading,
+                "cloud_cover",
+            ),
+
+            "risk_level": str(
+                zone.get(
+                    "risk_level",
+                    "UNKNOWN",
+                )
+            ),
+
+            "air_quality_timestamp": (
+                timestamp
+            ),
+
+            "weather_timestamp": (
+                timestamp
+            ),
+        }
 
 
 # ---------------------------------------------------------
@@ -151,8 +533,10 @@ def _number(
 def get_ai_insights(
     zone_id: str = Query(...),
 ) -> dict:
-    reading = _get_latest_aqi_reading(
-        zone_id
+    reading = (
+        _get_latest_aqi_reading(
+            zone_id
+        )
     )
 
     aqi = _number(
@@ -162,6 +546,7 @@ def get_ai_insights(
 
     if aqi >= 201:
         risk_level = "SEVERE"
+
         recommendation = (
             "Avoid outdoor exposure and follow "
             "local health advisories."
@@ -169,6 +554,7 @@ def get_ai_insights(
 
     elif aqi >= 151:
         risk_level = "HIGH"
+
         recommendation = (
             "Reduce prolonged outdoor activity "
             "and use protective measures."
@@ -176,6 +562,7 @@ def get_ai_insights(
 
     elif aqi >= 101:
         risk_level = "MODERATE"
+
         recommendation = (
             "Sensitive individuals should reduce "
             "prolonged outdoor activity."
@@ -183,6 +570,7 @@ def get_ai_insights(
 
     else:
         risk_level = "LOW"
+
         recommendation = (
             "Air quality is relatively acceptable "
             "for normal outdoor activity."
@@ -208,11 +596,16 @@ def ai_source_detection(
     payload: dict,
     user: dict = Depends(
         require_roles(
-            ["AUTHORITY", "ADMIN"]
+            [
+                "AUTHORITY",
+                "ADMIN",
+            ]
         )
     ),
 ) -> dict:
-    integrations = _load_parth_integrations()
+    integrations = (
+        _load_parth_integrations()
+    )
 
     zone_id = payload.get(
         "zone_id"
@@ -225,19 +618,24 @@ def ai_source_detection(
                 "success": False,
                 "error": {
                     "code": "ZONE_ID_REQUIRED",
-                    "message": "zone_id is required.",
+                    "message": (
+                        "zone_id is required."
+                    ),
                 },
             },
         )
 
-    # Frontend sends pollutants and weather separately.
     pollutants = (
-        payload.get("pollutants")
+        payload.get(
+            "pollutants"
+        )
         or {}
     )
 
     weather = (
-        payload.get("weather")
+        payload.get(
+            "weather"
+        )
         or {}
     )
 
@@ -253,12 +651,15 @@ def ai_source_detection(
     ):
         weather = {}
 
-    reading = _get_latest_aqi_reading(
-        zone_id
+    reading = (
+        _get_latest_aqi_reading(
+            zone_id
+        )
     )
 
     source_input = {
         "zone_id": zone_id,
+
         "aqi": _number(
             pollutants,
             "aqi",
@@ -267,6 +668,7 @@ def ai_source_detection(
                 "aqi",
             ),
         ),
+
         "pm25": _number(
             pollutants,
             "pm25",
@@ -275,6 +677,7 @@ def ai_source_detection(
                 "pm25",
             ),
         ),
+
         "pm10": _number(
             pollutants,
             "pm10",
@@ -283,6 +686,7 @@ def ai_source_detection(
                 "pm10",
             ),
         ),
+
         "no2": _number(
             pollutants,
             "no2",
@@ -291,6 +695,7 @@ def ai_source_detection(
                 "no2",
             ),
         ),
+
         "so2": _number(
             pollutants,
             "so2",
@@ -299,6 +704,7 @@ def ai_source_detection(
                 "so2",
             ),
         ),
+
         "co": _number(
             pollutants,
             "co",
@@ -307,6 +713,7 @@ def ai_source_detection(
                 "co",
             ),
         ),
+
         "temperature": _number(
             weather,
             "temperature",
@@ -315,6 +722,7 @@ def ai_source_detection(
                 "temperature",
             ),
         ),
+
         "humidity": _number(
             weather,
             "humidity",
@@ -323,6 +731,7 @@ def ai_source_detection(
                 "humidity",
             ),
         ),
+
         "wind_speed": _number(
             weather,
             "wind_speed",
@@ -359,7 +768,7 @@ def ai_source_detection(
 
 
 # ---------------------------------------------------------
-# Gemini AQI analysis
+# Gemini AQI analysis - LIVE DATA
 # ---------------------------------------------------------
 
 @router.post("/analyze")
@@ -375,7 +784,9 @@ def ai_analyze(
         )
     ),
 ) -> dict:
-    integrations = _load_parth_integrations()
+    integrations = (
+        _load_parth_integrations()
+    )
 
     zone_id = payload.get(
         "zone_id"
@@ -392,7 +803,9 @@ def ai_analyze(
                 "success": False,
                 "error": {
                     "code": "ZONE_ID_REQUIRED",
-                    "message": "zone_id is required.",
+                    "message": (
+                        "zone_id is required."
+                    ),
                 },
             },
         )
@@ -404,60 +817,102 @@ def ai_analyze(
                 "success": False,
                 "error": {
                     "code": "QUESTION_REQUIRED",
-                    "message": "question is required.",
+                    "message": (
+                        "question is required."
+                    ),
                 },
             },
         )
 
-    reading = _get_latest_aqi_reading(
-        zone_id
+    # Live Open-Meteo context
+    context = (
+        _get_live_ai_context(
+            zone_id
+        )
     )
 
     try:
-        return integrations[
+        result = integrations[
             "air_quality"
         ](
             zone_id=zone_id,
-            aqi=_number(
-                reading,
-                "aqi",
-            ),
-            pm25=_number(
-                reading,
-                "pm25",
-            ),
-            pm10=_number(
-                reading,
-                "pm10",
-            ),
-            no2=_number(
-                reading,
-                "no2",
-            ),
-            so2=_number(
-                reading,
-                "so2",
-            ),
-            co=_number(
-                reading,
-                "co",
-            ),
-            temperature=_number(
-                reading,
-                "temperature",
-            ),
-            humidity=_number(
-                reading,
-                "humidity",
-            ),
-            wind_speed=_number(
-                reading,
-                "wind_speed",
-            ),
+
+            aqi=context[
+                "aqi"
+            ],
+
+            pm25=context[
+                "pm25"
+            ],
+
+            pm10=context[
+                "pm10"
+            ],
+
+            no2=context[
+                "no2"
+            ],
+
+            so2=context[
+                "so2"
+            ],
+
+            co=context[
+                "co"
+            ],
+
+            temperature=context[
+                "temperature"
+            ],
+
+            humidity=context[
+                "humidity"
+            ],
+
+            wind_speed=context[
+                "wind_speed"
+            ],
+
             question=str(
                 question
             ),
         )
+
+        # Add metadata without breaking
+        # Parth's existing response contract.
+        if isinstance(
+            result,
+            dict,
+        ):
+            result.setdefault(
+                "zone_name",
+                context[
+                    "zone_name"
+                ],
+            )
+
+            result.setdefault(
+                "data_source",
+                context[
+                    "data_source"
+                ],
+            )
+
+            result.setdefault(
+                "live_aqi",
+                context[
+                    "aqi"
+                ],
+            )
+
+            result.setdefault(
+                "data_timestamp",
+                context[
+                    "air_quality_timestamp"
+                ],
+            )
+
+        return result
 
     except HTTPException:
         raise
@@ -478,7 +933,7 @@ def ai_analyze(
 
 
 # ---------------------------------------------------------
-# Gemini chat
+# Gemini chat - LIVE DATA
 # ---------------------------------------------------------
 
 @router.post("/chat")
@@ -494,7 +949,9 @@ def ai_chat(
         )
     ),
 ) -> dict:
-    integrations = _load_parth_integrations()
+    integrations = (
+        _load_parth_integrations()
+    )
 
     message = payload.get(
         "message"
@@ -511,7 +968,9 @@ def ai_chat(
                 "success": False,
                 "error": {
                     "code": "MESSAGE_REQUIRED",
-                    "message": "message is required.",
+                    "message": (
+                        "message is required."
+                    ),
                 },
             },
         )
@@ -523,115 +982,21 @@ def ai_chat(
                 "success": False,
                 "error": {
                     "code": "ZONE_ID_REQUIRED",
-                    "message": "zone_id is required.",
+                    "message": (
+                        "zone_id is required."
+                    ),
                 },
             },
         )
 
-    reading = _get_latest_aqi_reading(
-        zone_id
-    )
-
-    # Load human-readable zone information so Gemini
-    # understands that e.g. zone_001 may represent Ahmedabad.
-    db = get_firestore()
-
-    zone_document = (
-        db.collection("zones")
-        .document(zone_id)
-        .get()
-    )
-
-    zone_data = (
-        zone_document.to_dict()
-        if zone_document.exists
-        else {}
-    )
-
-    if not isinstance(
-        zone_data,
-        dict,
-    ):
-        zone_data = {}
-
-    zone_name = str(
-        zone_data.get(
-            "name",
-            zone_id,
+    context = (
+        _get_live_ai_context(
+            zone_id
         )
     )
-
-    risk_level = str(
-        zone_data.get(
-            "risk_level",
-            "UNKNOWN",
-        )
-    )
-
-    reading_timestamp = reading.get(
-        "timestamp"
-    )
-
-    if reading_timestamp is not None:
-        reading_timestamp = str(
-            reading_timestamp
-        )
-
-    context = {
-        "zone_id": zone_id,
-        "zone_name": zone_name,
-        "latitude": _number(
-            zone_data,
-            "latitude",
-        ),
-        "longitude": _number(
-            zone_data,
-            "longitude",
-        ),
-        "risk_level": risk_level,
-        "aqi": _number(
-            reading,
-            "aqi",
-        ),
-        "pm25": _number(
-            reading,
-            "pm25",
-        ),
-        "pm10": _number(
-            reading,
-            "pm10",
-        ),
-        "no2": _number(
-            reading,
-            "no2",
-        ),
-        "so2": _number(
-            reading,
-            "so2",
-        ),
-        "co": _number(
-            reading,
-            "co",
-        ),
-        "temperature": _number(
-            reading,
-            "temperature",
-        ),
-        "humidity": _number(
-            reading,
-            "humidity",
-        ),
-        "wind_speed": _number(
-            reading,
-            "wind_speed",
-        ),
-        "reading_timestamp": (
-            reading_timestamp
-        ),
-    }
 
     try:
-        return integrations[
+        result = integrations[
             "chat"
         ](
             message=str(
@@ -640,6 +1005,33 @@ def ai_chat(
             zone_id=zone_id,
             context=context,
         )
+
+        if isinstance(
+            result,
+            dict,
+        ):
+            result.setdefault(
+                "data_source",
+                context[
+                    "data_source"
+                ],
+            )
+
+            result.setdefault(
+                "live_aqi",
+                context[
+                    "aqi"
+                ],
+            )
+
+            result.setdefault(
+                "data_timestamp",
+                context[
+                    "air_quality_timestamp"
+                ],
+            )
+
+        return result
 
     except HTTPException:
         raise
@@ -666,11 +1058,16 @@ def ai_forecast_explain(
     payload: dict,
     user: dict = Depends(
         require_roles(
-            ["AUTHORITY", "ADMIN"]
+            [
+                "AUTHORITY",
+                "ADMIN",
+            ]
         )
     ),
 ) -> dict:
-    integrations = _load_parth_integrations()
+    integrations = (
+        _load_parth_integrations()
+    )
 
     zone_id = payload.get(
         "zone_id"
@@ -687,13 +1084,13 @@ def ai_forecast_explain(
                 "success": False,
                 "error": {
                     "code": "ZONE_ID_REQUIRED",
-                    "message": "zone_id is required.",
+                    "message": (
+                        "zone_id is required."
+                    ),
                 },
             },
         )
 
-    # Frontend may send complete forecast array
-    # or a single forecast object.
     if isinstance(
         forecast,
         list,
@@ -713,13 +1110,13 @@ def ai_forecast_explain(
     else:
         forecast_item = {}
 
-    # If frontend does not provide forecast,
-    # use latest stored Firestore forecast.
     if not forecast_item:
         db = get_firestore()
 
         forecast_documents = (
-            db.collection("forecasts")
+            db.collection(
+                "forecasts"
+            )
             .where(
                 "zone_id",
                 "==",
@@ -755,6 +1152,7 @@ def ai_forecast_explain(
 
         forecast_item = (
             records[0].to_dict()
+            or {}
         )
 
     predicted_aqi = _number(
@@ -828,11 +1226,16 @@ def ai_evidence_analyze(
     payload: dict,
     user: dict = Depends(
         require_roles(
-            ["AUTHORITY", "ADMIN"]
+            [
+                "AUTHORITY",
+                "ADMIN",
+            ]
         )
     ),
 ) -> dict:
-    integrations = _load_parth_integrations()
+    integrations = (
+        _load_parth_integrations()
+    )
 
     evidence_id = payload.get(
         "evidence_id"
@@ -857,7 +1260,9 @@ def ai_evidence_analyze(
     db = get_firestore()
 
     evidence_document = (
-        db.collection("evidence")
+        db.collection(
+            "evidence"
+        )
         .document(
             str(evidence_id)
         )
@@ -886,8 +1291,10 @@ def ai_evidence_analyze(
         or {}
     )
 
-    storage_path = evidence.get(
-        "storage_path"
+    storage_path = (
+        evidence.get(
+            "storage_path"
+        )
     )
 
     if not storage_path:
@@ -970,7 +1377,9 @@ def ai_evidence_analyze(
         return integrations[
             "evidence"
         ](
-            str(image_path)
+            str(
+                image_path
+            )
         )
 
     except HTTPException:
