@@ -16,6 +16,7 @@ import AIChat from "../components/ai/AIChat";
 import { useAQI } from "../hooks/useAQI";
 import { useForecast } from "../hooks/useForecast";
 import { useHotspots } from "../hooks/useHotspots";
+import { useZones } from "../hooks/useZones";
 import { useAppContext } from "../context/AppContext";
 
 
@@ -30,25 +31,19 @@ function getDiagnosis(aqiData) {
 
   const factors = [];
 
-  if (
-    Number(aqiData.pm25) >= 35
-  ) {
+  if (Number(aqiData.pm25) >= 35) {
     factors.push(
       "Elevated PM2.5 concentration"
     );
   }
 
-  if (
-    Number(aqiData.pm10) >= 50
-  ) {
+  if (Number(aqiData.pm10) >= 50) {
     factors.push(
       "Elevated PM10 concentration"
     );
   }
 
-  if (
-    Number(aqiData.no2) >= 40
-  ) {
+  if (Number(aqiData.no2) >= 40) {
     factors.push(
       "Elevated NO2 concentration"
     );
@@ -84,6 +79,10 @@ function Dashboard() {
     selectedZone,
   } = useAppContext();
 
+  // -------------------------------------------------------
+  // Selected zone live data
+  // -------------------------------------------------------
+
   const {
     data: apiAQI,
     loading,
@@ -91,6 +90,31 @@ function Dashboard() {
   } = useAQI(
     selectedZone
   );
+
+  // -------------------------------------------------------
+  // ALL zones live data
+  // Ahmedabad, Gandhinagar, Vadodara, etc.
+  // -------------------------------------------------------
+
+  const {
+    zones: allZones,
+    loading: zonesLoading,
+    error: zonesError,
+  } = useZones();
+
+  // Only use zones that successfully received live data.
+  const liveZones = (
+    allZones || []
+  ).filter(
+    (zone) =>
+      zone.live &&
+      zone.aqi !== null &&
+      zone.aqi !== undefined
+  );
+
+  // -------------------------------------------------------
+  // Forecast
+  // -------------------------------------------------------
 
   const {
     data: forecastData,
@@ -100,6 +124,10 @@ function Dashboard() {
     selectedZone,
     24
   );
+
+  // -------------------------------------------------------
+  // Hotspots
+  // -------------------------------------------------------
 
   const {
     hotspots,
@@ -128,27 +156,6 @@ function Dashboard() {
       ? hotspots[0]
       : null;
 
-  /*
-   * Do not show old hardcoded AQI values.
-   * For now the map receives the currently
-   * selected live zone only.
-   *
-   * Later we can load all joined zones live.
-   */
-  const zones =
-    hasLiveData
-      ? [
-          {
-            zone_id:
-              currentAQI.zone_id,
-            name:
-              currentAQI.zone_name,
-            current_aqi:
-              currentAQI.aqi,
-          },
-        ]
-      : [];
-
   const liveTimestamp =
     currentAQI?.air_quality_timestamp ??
     currentAQI?.weather_timestamp ??
@@ -162,10 +169,8 @@ function Dashboard() {
         ).toLocaleTimeString(
           [],
           {
-            hour:
-              "2-digit",
-            minute:
-              "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
           }
         )
       : loading
@@ -302,11 +307,6 @@ function Dashboard() {
                   ?.risk_level ??
                 "UNKNOWN"
               }
-              confidence={
-                latestForecast
-                  ?.confidence ??
-                0
-              }
               timestamp={
                 latestForecast
                   ?.timestamp ??
@@ -317,17 +317,30 @@ function Dashboard() {
 
           {forecastLoading && (
             <p>
-              Loading
-              forecast...
+              Loading forecast...
             </p>
           )}
 
           {forecastError && (
             <p>
-              Forecast
-              unavailable:
+              Forecast unavailable:
               {" "}
               {forecastError}
+            </p>
+          )}
+
+          {zonesLoading && (
+            <p>
+              Loading live zone
+              network...
+            </p>
+          )}
+
+          {zonesError && (
+            <p>
+              Zone network unavailable:
+              {" "}
+              {zonesError}
             </p>
           )}
 
@@ -335,7 +348,7 @@ function Dashboard() {
             <div className="dashboard-main-column">
               <PollutionMap
                 zones={
-                  zones
+                  liveZones
                 }
                 hotspots={
                   hotspots
@@ -381,7 +394,25 @@ function Dashboard() {
                 )}
 
                 <RiskClusters
-                  clusters={[]}
+                  clusters={
+                    liveZones.map(
+                      (zone) => ({
+                        cluster_id:
+                          zone.zone_id,
+
+                        name:
+                          zone.name,
+
+                        risk_level:
+                          zone.category ??
+                          zone.risk_level ??
+                          "UNKNOWN",
+
+                        aqi:
+                          zone.aqi,
+                      })
+                    )
+                  }
                 />
               </div>
             </div>
