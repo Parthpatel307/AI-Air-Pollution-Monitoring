@@ -128,7 +128,9 @@ function Dashboard() {
 
             <strong>
               {new Date(
-                currentAQI.timestamp
+                currentAQI.air_quality_timestamp ??
+                  currentAQI.weather_timestamp ??
+                  currentAQI.timestamp
               ).toLocaleTimeString([], {
                 hour: "2-digit",
                 minute: "2-digit",
@@ -142,7 +144,11 @@ function Dashboard() {
         <AQICard
           aqi={currentAQI.aqi}
           category={currentAQI.category}
-          timestamp={currentAQI.timestamp}
+          timestamp={
+            currentAQI.air_quality_timestamp ??
+            currentAQI.weather_timestamp ??
+            currentAQI.timestamp
+          }
         />
 
         <PM25Card
