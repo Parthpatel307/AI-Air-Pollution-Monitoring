@@ -1,5 +1,6 @@
 """Open-Meteo live environmental data integration."""
 
+from datetime import datetime
 from typing import Any
 
 import httpx
@@ -35,9 +36,7 @@ def _aqi_category(
         return "MODERATE"
 
     if value <= 150:
-        return (
-            "UNHEALTHY_FOR_SENSITIVE_GROUPS"
-        )
+        return "UNHEALTHY_FOR_SENSITIVE_GROUPS"
 
     if value <= 200:
         return "UNHEALTHY"
@@ -78,9 +77,7 @@ def get_current_air_quality(
             params={
                 "latitude": latitude,
                 "longitude": longitude,
-                "current": (
-                    current_variables
-                ),
+                "current": current_variables,
                 "timezone": "auto",
             },
         )
@@ -170,6 +167,88 @@ def get_current_air_quality(
     }
 
 
+def get_air_quality_forecast(
+    *,
+    latitude: float,
+    longitude: float,
+    hours: int = 24,
+) -> list[dict[str, Any]]:
+    """
+    Fetch hourly US AQI forecast
+    from Open-Meteo.
+    """
+
+    safe_hours = max(
+        1,
+        min(
+            int(hours),
+            168,
+        ),
+    )
+
+    with httpx.Client(
+        timeout=20.0
+    ) as client:
+        response = client.get(
+            AIR_QUALITY_URL,
+            params={
+                "latitude": latitude,
+                "longitude": longitude,
+                "hourly": "us_aqi",
+                "forecast_hours": safe_hours,
+                "timezone": "auto",
+            },
+        )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    hourly = (
+        data.get("hourly")
+        or {}
+    )
+
+    times = (
+        hourly.get("time")
+        or []
+    )
+
+    aqis = (
+        hourly.get("us_aqi")
+        or []
+    )
+
+    forecast: list[
+        dict[str, Any]
+    ] = []
+
+    for timestamp, aqi in zip(
+        times,
+        aqis,
+    ):
+        if aqi is None:
+            continue
+
+        forecast.append(
+            {
+                "timestamp": timestamp,
+                "predicted_aqi": float(
+                    aqi
+                ),
+                "risk_level": _aqi_category(
+                    aqi
+                ),
+                # Open-Meteo does not expose
+                # a per-hour confidence score.
+                "confidence": 0.0,
+                "source": "open_meteo",
+            }
+        )
+
+    return forecast
+
+
 def get_current_weather(
     *,
     latitude: float,
@@ -200,9 +279,7 @@ def get_current_weather(
             params={
                 "latitude": latitude,
                 "longitude": longitude,
-                "current": (
-                    current_variables
-                ),
+                "current": current_variables,
                 "timezone": "auto",
             },
         )
