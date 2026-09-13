@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import {
+  useEffect,
+  useState,
+} from "react";
 
 import {
-  getZones,
-} from "../services/zoneService";
-
-import {
-  getCurrentAQI,
+  getLiveAQINetwork,
 } from "../services/aqiService";
 
 
@@ -42,109 +41,80 @@ export function useZones() {
       }
 
       try {
-        const zoneData =
-          await getZones();
+        /*
+         * IMPORTANT:
+         *
+         * This is now ONE backend request.
+         *
+         * Old:
+         * 46 x /aqi/live
+         *
+         * New:
+         * 1 x /aqi/live-network
+         */
+        const networkData =
+          await getLiveAQINetwork();
 
-        const zonesWithAQI =
-          await Promise.all(
-            (zoneData || []).map(
-              async (zone) => {
-                try {
-                  const aqiData =
-                    await getCurrentAQI(
-                      zone.zone_id
-                    );
 
-                  return {
-                    ...zone,
+        const liveNetwork =
+          Array.isArray(
+            networkData?.zones
+          )
+            ? networkData.zones
+            : [];
 
-                    current_aqi:
-                      aqiData.aqi,
 
-                    aqi:
-                      aqiData.aqi,
+        const normalizedZones =
+          liveNetwork.map(
+            (zone) => ({
+              ...zone,
 
-                    pm25:
-                      aqiData.pm25,
+              current_aqi:
+                zone.aqi,
 
-                    pm10:
-                      aqiData.pm10,
+              risk_level:
+                zone.category ??
+                "UNKNOWN",
 
-                    no2:
-                      aqiData.no2,
+              timestamp:
+                zone
+                  .air_quality_timestamp ??
+                zone
+                  .weather_timestamp ??
+                null,
 
-                    so2:
-                      aqiData.so2,
+              source:
+                zone.source ??
+                "open_meteo",
 
-                    co:
-                      aqiData.co,
+              live:
+                zone.live !== false &&
+                zone.aqi !== null &&
+                zone.aqi !==
+                  undefined,
 
-                    o3:
-                      aqiData.o3,
-
-                    temperature:
-                      aqiData.temperature,
-
-                    humidity:
-                      aqiData.humidity,
-
-                    wind_speed:
-                      aqiData.wind_speed,
-
-                    category:
-                      aqiData.category,
-
-                    risk_level:
-                      aqiData.category,
-
-                    timestamp:
-                      aqiData
-                        .air_quality_timestamp ??
-                      aqiData
-                        .weather_timestamp ??
-                      null,
-
-                    source:
-                      aqiData.source ??
-                      "open_meteo",
-
-                    live: true,
-
-                    trend: 0,
-                  };
-                } catch (err) {
-                  return {
-                    ...zone,
-
-                    current_aqi:
-                      null,
-
-                    aqi:
-                      null,
-
-                    live: false,
-
-                    error:
-                      err?.message ??
-                      "Live AQI unavailable",
-                  };
-                }
-              }
-            )
+              trend: 0,
+            })
           );
+
 
         if (!cancelled) {
           setZones(
-            zonesWithAQI
+            normalizedZones
           );
 
           setError(null);
         }
       } catch (err) {
         if (!cancelled) {
+          /*
+           * Keep previous live data
+           * if an automatic refresh
+           * temporarily fails.
+           */
           setError(
             err?.message ||
-              "Unable to load zones."
+              "Unable to load live zone network."
           );
         }
       } finally {

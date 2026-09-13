@@ -3,6 +3,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.database import get_firestore
 from app.integrations.open_meteo import (
+    get_bulk_environment_data,
     get_live_environment_data,
 )
 from app.schemas.aqi import (
@@ -15,6 +16,163 @@ router = APIRouter(
     prefix="/api/v1/aqi",
     tags=["AQI"],
 )
+
+
+# ---------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------
+
+def _get_zone_or_404(
+    zone_id: str,
+) -> dict:
+    db = get_firestore()
+
+    zone_document = (
+        db.collection("zones")
+        .document(zone_id)
+        .get()
+    )
+
+    if not zone_document.exists:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "success": False,
+                "error": {
+                    "code": "ZONE_NOT_FOUND",
+                    "message": (
+                        f"Zone '{zone_id}' was not found."
+                    ),
+                },
+            },
+        )
+
+    zone = (
+        zone_document.to_dict()
+        or {}
+    )
+
+    zone["zone_id"] = (
+        zone_document.id
+    )
+
+    return zone
+
+
+def _get_zone_coordinates(
+    zone: dict,
+) -> tuple[float, float]:
+    latitude = zone.get(
+        "latitude"
+    )
+
+    longitude = zone.get(
+        "longitude"
+    )
+
+    if (
+        latitude is None
+        or longitude is None
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "ZONE_COORDINATES_MISSING",
+
+                    "message": (
+                        "Latitude and longitude are "
+                        "required for live data."
+                    ),
+                },
+            },
+        )
+
+    try:
+        return (
+            float(latitude),
+            float(longitude),
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ) as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "INVALID_ZONE_COORDINATES",
+
+                    "message": (
+                        "Zone latitude or longitude "
+                        "is invalid."
+                    ),
+                },
+            },
+        ) from exc
+
+
+def _raise_open_meteo_error(
+    exc: Exception,
+) -> None:
+    if isinstance(
+        exc,
+        httpx.HTTPStatusError,
+    ):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "OPEN_METEO_REQUEST_FAILED",
+
+                    "message": (
+                        "Open-Meteo returned status "
+                        f"{exc.response.status_code}."
+                    ),
+                },
+            },
+        ) from exc
+
+    if isinstance(
+        exc,
+        httpx.RequestError,
+    ):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "OPEN_METEO_UNAVAILABLE",
+
+                    "message": (
+                        "Could not connect to "
+                        "Open-Meteo."
+                    ),
+                },
+            },
+        ) from exc
+
+    raise HTTPException(
+        status_code=500,
+        detail={
+            "success": False,
+            "error": {
+                "code":
+                    "LIVE_DATA_FAILED",
+
+                "message":
+                    str(exc),
+            },
+        },
+    ) from exc
 
 
 # ---------------------------------------------------------
@@ -31,28 +189,11 @@ def get_current_aqi(
     db = get_firestore()
 
     if zone_id:
-        zone_document = (
-            db.collection("zones")
-            .document(zone_id)
-            .get()
-        )
-
-        if not zone_document.exists:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "success": False,
-                    "error": {
-                        "code": "ZONE_NOT_FOUND",
-                        "message": (
-                            f"Zone '{zone_id}' was not found."
-                        ),
-                    },
-                },
+        zone = (
+            _get_zone_or_404(
+                zone_id
             )
-
-        zone = zone_document.to_dict() or {}
-        zone["zone_id"] = zone_document.id
+        )
 
     else:
         documents = list(
@@ -67,17 +208,29 @@ def get_current_aqi(
                 detail={
                     "success": False,
                     "error": {
-                        "code": "NO_ZONES_FOUND",
-                        "message": "No zones are available.",
+                        "code":
+                            "NO_ZONES_FOUND",
+
+                        "message":
+                            "No zones are available.",
                     },
                 },
             )
 
-        zone = documents[0].to_dict() or {}
-        zone["zone_id"] = documents[0].id
+        zone = (
+            documents[0]
+            .to_dict()
+            or {}
+        )
+
+        zone["zone_id"] = (
+            documents[0].id
+        )
 
     documents = (
-        db.collection("aqi_readings")
+        db.collection(
+            "aqi_readings"
+        )
         .where(
             "zone_id",
             "==",
@@ -91,7 +244,9 @@ def get_current_aqi(
         .stream()
     )
 
-    readings = list(documents)
+    readings = list(
+        documents
+    )
 
     if not readings:
         raise HTTPException(
@@ -99,7 +254,9 @@ def get_current_aqi(
             detail={
                 "success": False,
                 "error": {
-                    "code": "AQI_DATA_NOT_FOUND",
+                    "code":
+                        "AQI_DATA_NOT_FOUND",
+
                     "message": (
                         "No AQI data found for zone "
                         f"'{zone['zone_id']}'."
@@ -108,27 +265,217 @@ def get_current_aqi(
             },
         )
 
-    reading = readings[0].to_dict() or {}
+    reading = (
+        readings[0]
+        .to_dict()
+        or {}
+    )
 
     return AQICurrentResponse(
-        zone_id=zone["zone_id"],
-        zone_name=zone["name"],
-        aqi=reading["aqi"],
-        category=reading["category"],
-        pm25=reading["pm25"],
-        pm10=reading["pm10"],
-        no2=reading["no2"],
-        so2=reading["so2"],
-        co=reading["co"],
-        temperature=reading["temperature"],
-        humidity=reading["humidity"],
-        wind_speed=reading["wind_speed"],
-        timestamp=reading["timestamp"],
+        zone_id=
+            zone["zone_id"],
+
+        zone_name=
+            zone["name"],
+
+        aqi=
+            reading["aqi"],
+
+        category=
+            reading["category"],
+
+        pm25=
+            reading["pm25"],
+
+        pm10=
+            reading["pm10"],
+
+        no2=
+            reading["no2"],
+
+        so2=
+            reading["so2"],
+
+        co=
+            reading["co"],
+
+        temperature=
+            reading["temperature"],
+
+        humidity=
+            reading["humidity"],
+
+        wind_speed=
+            reading["wind_speed"],
+
+        timestamp=
+            reading["timestamp"],
     )
 
 
 # ---------------------------------------------------------
-# Open-Meteo live AQI + Weather
+# Open-Meteo LIVE NETWORK
+#
+# IMPORTANT:
+#
+# Instead of frontend calling:
+#
+#   /aqi/live 46 times
+#
+# frontend will call:
+#
+#   /aqi/live-network
+#
+# only once.
+#
+# Open-Meteo upstream:
+#   1 AQ request
+#   1 weather request
+#
+# ---------------------------------------------------------
+
+@router.get("/live-network")
+def get_live_network() -> dict:
+    db = get_firestore()
+
+    documents = list(
+        db.collection(
+            "zones"
+        ).stream()
+    )
+
+    if not documents:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "NO_ZONES_FOUND",
+
+                    "message":
+                        "No zones are available.",
+                },
+            },
+        )
+
+    locations = []
+
+    for document in documents:
+        zone = (
+            document.to_dict()
+            or {}
+        )
+
+        latitude = zone.get(
+            "latitude"
+        )
+
+        longitude = zone.get(
+            "longitude"
+        )
+
+        if (
+            latitude is None
+            or longitude is None
+        ):
+            continue
+
+        try:
+            latitude = float(
+                latitude
+            )
+
+            longitude = float(
+                longitude
+            )
+
+        except (
+            TypeError,
+            ValueError,
+        ):
+            continue
+
+        locations.append(
+            {
+                "zone_id":
+                    document.id,
+
+                "name":
+                    zone.get(
+                        "name",
+                        document.id,
+                    ),
+
+                "state":
+                    zone.get(
+                        "state"
+                    ),
+
+                "latitude":
+                    latitude,
+
+                "longitude":
+                    longitude,
+            }
+        )
+
+    if not locations:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "NO_VALID_ZONE_COORDINATES",
+
+                    "message": (
+                        "No zones with valid "
+                        "coordinates are available."
+                    ),
+                },
+            },
+        )
+
+    try:
+        live_zones = (
+            get_bulk_environment_data(
+                locations
+            )
+        )
+
+    except Exception as exc:
+        _raise_open_meteo_error(
+            exc
+        )
+
+    successful = [
+        zone
+        for zone in live_zones
+        if zone.get("live")
+    ]
+
+    return {
+        "success": True,
+
+        "data": {
+            "source":
+                "open_meteo",
+
+            "total_zones":
+                len(locations),
+
+            "live_zones":
+                len(successful),
+
+            "zones":
+                live_zones,
+        },
+    }
+
+
+# ---------------------------------------------------------
+# Open-Meteo LIVE single zone AQI + Weather
 # ---------------------------------------------------------
 
 @router.get("/live")
@@ -140,208 +487,170 @@ def get_live_aqi(
     from Open-Meteo using zone coordinates.
     """
 
-    db = get_firestore()
-
-    zone_document = (
-        db.collection("zones")
-        .document(zone_id)
-        .get()
+    zone = (
+        _get_zone_or_404(
+            zone_id
+        )
     )
 
-    if not zone_document.exists:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "ZONE_NOT_FOUND",
-                    "message": (
-                        f"Zone '{zone_id}' was not found."
-                    ),
-                },
-            },
-        )
-
-    zone = zone_document.to_dict() or {}
-
-    latitude = zone.get("latitude")
-    longitude = zone.get("longitude")
-
-    if latitude is None or longitude is None:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "ZONE_COORDINATES_MISSING",
-                    "message": (
-                        "Latitude and longitude are "
-                        "required for live data."
-                    ),
-                },
-            },
-        )
+    (
+        latitude,
+        longitude,
+    ) = _get_zone_coordinates(
+        zone
+    )
 
     try:
-        latitude = float(latitude)
-        longitude = float(longitude)
+        live_data = (
+            get_live_environment_data(
+                latitude=
+                    latitude,
 
-    except (TypeError, ValueError) as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "INVALID_ZONE_COORDINATES",
-                    "message": (
-                        "Zone latitude or longitude "
-                        "is invalid."
-                    ),
-                },
-            },
-        ) from exc
-
-    try:
-        live_data = get_live_environment_data(
-            latitude=latitude,
-            longitude=longitude,
+                longitude=
+                    longitude,
+            )
         )
-
-    except httpx.HTTPStatusError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "OPEN_METEO_REQUEST_FAILED",
-                    "message": (
-                        "Open-Meteo returned status "
-                        f"{exc.response.status_code}."
-                    ),
-                },
-            },
-        ) from exc
-
-    except httpx.RequestError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "OPEN_METEO_UNAVAILABLE",
-                    "message": (
-                        "Could not connect to "
-                        "Open-Meteo."
-                    ),
-                },
-            },
-        ) from exc
 
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "LIVE_DATA_FAILED",
-                    "message": str(exc),
-                },
-            },
-        ) from exc
+        _raise_open_meteo_error(
+            exc
+        )
 
     air_quality = (
-        live_data.get("air_quality")
+        live_data.get(
+            "air_quality"
+        )
         or {}
     )
 
     weather = (
-        live_data.get("weather")
+        live_data.get(
+            "weather"
+        )
         or {}
     )
 
     return {
         "success": True,
+
         "data": {
-            "zone_id": zone_id,
-            "zone_name": zone.get(
-                "name",
+            "zone_id":
                 zone_id,
-            ),
 
-            "latitude": latitude,
-            "longitude": longitude,
+            "zone_name":
+                zone.get(
+                    "name",
+                    zone_id,
+                ),
 
-            "source": "open_meteo",
+            "state":
+                zone.get(
+                    "state"
+                ),
 
-            "aqi": air_quality.get(
-                "aqi"
-            ),
-            "category": air_quality.get(
-                "category"
-            ),
+            "latitude":
+                latitude,
 
-            "pm25": air_quality.get(
-                "pm25"
-            ),
-            "pm10": air_quality.get(
-                "pm10"
-            ),
-            "no2": air_quality.get(
-                "no2"
-            ),
-            "so2": air_quality.get(
-                "so2"
-            ),
-            "co": air_quality.get(
-                "co"
-            ),
-            "o3": air_quality.get(
-                "o3"
-            ),
+            "longitude":
+                longitude,
 
-            "temperature": weather.get(
-                "temperature"
-            ),
-            "feels_like": weather.get(
-                "feels_like"
-            ),
-            "humidity": weather.get(
-                "humidity"
-            ),
-            "wind_speed": weather.get(
-                "wind_speed"
-            ),
-            "wind_direction": weather.get(
-                "wind_direction"
-            ),
-            "cloud_cover": weather.get(
-                "cloud_cover"
-            ),
-            "weather_code": weather.get(
-                "weather_code"
-            ),
+            "source":
+                "open_meteo",
 
-            "air_quality_timestamp": (
+            "aqi":
+                air_quality.get(
+                    "aqi"
+                ),
+
+            "category":
+                air_quality.get(
+                    "category"
+                ),
+
+            "pm25":
+                air_quality.get(
+                    "pm25"
+                ),
+
+            "pm10":
+                air_quality.get(
+                    "pm10"
+                ),
+
+            "no2":
+                air_quality.get(
+                    "no2"
+                ),
+
+            "so2":
+                air_quality.get(
+                    "so2"
+                ),
+
+            "co":
+                air_quality.get(
+                    "co"
+                ),
+
+            "o3":
+                air_quality.get(
+                    "o3"
+                ),
+
+            "temperature":
+                weather.get(
+                    "temperature"
+                ),
+
+            "feels_like":
+                weather.get(
+                    "feels_like"
+                ),
+
+            "humidity":
+                weather.get(
+                    "humidity"
+                ),
+
+            "wind_speed":
+                weather.get(
+                    "wind_speed"
+                ),
+
+            "wind_direction":
+                weather.get(
+                    "wind_direction"
+                ),
+
+            "cloud_cover":
+                weather.get(
+                    "cloud_cover"
+                ),
+
+            "weather_code":
+                weather.get(
+                    "weather_code"
+                ),
+
+            "air_quality_timestamp":
                 air_quality.get(
                     "timestamp"
-                )
-            ),
-            "weather_timestamp": (
+                ),
+
+            "weather_timestamp":
                 weather.get(
                     "timestamp"
-                )
-            ),
+                ),
 
-            "air_quality_units": (
+            "air_quality_units":
                 air_quality.get(
                     "units"
-                )
-            ),
-            "weather_units": (
+                ),
+
+            "weather_units":
                 weather.get(
                     "units"
-                )
-            ),
+                ),
         },
     }
 
@@ -356,6 +665,7 @@ def get_live_aqi(
 )
 def get_aqi_history(
     zone_id: str = Query(...),
+
     limit: int = Query(
         default=24,
         ge=1,
@@ -364,30 +674,16 @@ def get_aqi_history(
 ) -> AQIHistoryResponse:
     db = get_firestore()
 
-    zone_document = (
-        db.collection("zones")
-        .document(zone_id)
-        .get()
+    zone = (
+        _get_zone_or_404(
+            zone_id
+        )
     )
 
-    if not zone_document.exists:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "ZONE_NOT_FOUND",
-                    "message": (
-                        f"Zone '{zone_id}' was not found."
-                    ),
-                },
-            },
-        )
-
-    zone = zone_document.to_dict() or {}
-
     documents = (
-        db.collection("aqi_readings")
+        db.collection(
+            "aqi_readings"
+        )
         .where(
             "zone_id",
             "==",
@@ -397,11 +693,15 @@ def get_aqi_history(
             "timestamp",
             direction="DESCENDING",
         )
-        .limit(limit)
+        .limit(
+            limit
+        )
         .stream()
     )
 
-    readings = list(documents)
+    readings = list(
+        documents
+    )
 
     if not readings:
         raise HTTPException(
@@ -409,7 +709,9 @@ def get_aqi_history(
             detail={
                 "success": False,
                 "error": {
-                    "code": "AQI_HISTORY_NOT_FOUND",
+                    "code":
+                        "AQI_HISTORY_NOT_FOUND",
+
                     "message": (
                         "No AQI history found for "
                         f"zone '{zone_id}'."
@@ -418,31 +720,66 @@ def get_aqi_history(
             },
         )
 
-    history: list[AQICurrentResponse] = []
+    history: list[
+        AQICurrentResponse
+    ] = []
 
     for document in readings:
-        data = document.to_dict() or {}
+        data = (
+            document.to_dict()
+            or {}
+        )
 
         history.append(
             AQICurrentResponse(
-                zone_id=zone_id,
-                zone_name=zone["name"],
-                aqi=data["aqi"],
-                category=data["category"],
-                pm25=data["pm25"],
-                pm10=data["pm10"],
-                no2=data["no2"],
-                so2=data["so2"],
-                co=data["co"],
-                temperature=data["temperature"],
-                humidity=data["humidity"],
-                wind_speed=data["wind_speed"],
-                timestamp=data["timestamp"],
+                zone_id=
+                    zone_id,
+
+                zone_name=
+                    zone["name"],
+
+                aqi=
+                    data["aqi"],
+
+                category=
+                    data["category"],
+
+                pm25=
+                    data["pm25"],
+
+                pm10=
+                    data["pm10"],
+
+                no2=
+                    data["no2"],
+
+                so2=
+                    data["so2"],
+
+                co=
+                    data["co"],
+
+                temperature=
+                    data["temperature"],
+
+                humidity=
+                    data["humidity"],
+
+                wind_speed=
+                    data["wind_speed"],
+
+                timestamp=
+                    data["timestamp"],
             )
         )
 
     return AQIHistoryResponse(
-        zone_id=zone_id,
-        zone_name=zone["name"],
-        readings=history,
+        zone_id=
+            zone_id,
+
+        zone_name=
+            zone["name"],
+
+        readings=
+            history,
     )
