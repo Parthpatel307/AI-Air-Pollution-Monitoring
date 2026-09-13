@@ -18,43 +18,105 @@ import { useForecast } from "../hooks/useForecast";
 import { useHotspots } from "../hooks/useHotspots";
 import { useAppContext } from "../context/AppContext";
 
+
+function getDiagnosis(aqiData) {
+  if (!aqiData) {
+    return {
+      summary:
+        "Waiting for current air-quality data.",
+      factors: [],
+    };
+  }
+
+  const factors = [];
+
+  if (
+    Number(aqiData.pm25) >= 35
+  ) {
+    factors.push(
+      "Elevated PM2.5 concentration"
+    );
+  }
+
+  if (
+    Number(aqiData.pm10) >= 50
+  ) {
+    factors.push(
+      "Elevated PM10 concentration"
+    );
+  }
+
+  if (
+    Number(aqiData.no2) >= 40
+  ) {
+    factors.push(
+      "Elevated NO2 concentration"
+    );
+  }
+
+  if (
+    Number(aqiData.wind_speed) > 0 &&
+    Number(aqiData.wind_speed) < 5
+  ) {
+    factors.push(
+      "Low wind dispersion"
+    );
+  }
+
+  if (factors.length === 0) {
+    factors.push(
+      "No major pollutant spike detected in current data"
+    );
+  }
+
+  return {
+    summary:
+      `Current AQI is ${aqiData.aqi} (${aqiData.category}). ` +
+      "Assessment is based on the latest available live air-quality " +
+      "and weather measurements.",
+    factors,
+  };
+}
+
+
 function Dashboard() {
-  const { selectedZone } = useAppContext();
+  const {
+    selectedZone,
+  } = useAppContext();
 
   const {
     data: apiAQI,
     loading,
     error,
-  } = useAQI(selectedZone);
+  } = useAQI(
+    selectedZone
+  );
 
   const {
     data: forecastData,
     loading: forecastLoading,
     error: forecastError,
-  } = useForecast(selectedZone, 24);
+  } = useForecast(
+    selectedZone,
+    24
+  );
 
   const {
     hotspots,
     loading: hotspotsLoading,
     error: hotspotsError,
-  } = useHotspots(selectedZone);
+  } = useHotspots(
+    selectedZone
+  );
 
-  const demoAQI = {
-    zone_id: selectedZone,
-    zone_name: "Ahmedabad",
-    aqi: 142,
-    category: "UNHEALTHY",
-    pm25: 78.4,
-    pm10: 121.2,
-    temperature: 31.4,
-    humidity: 62,
-    wind_speed: 8.2,
-    timestamp: new Date().toISOString(),
-  };
+  const currentAQI =
+    apiAQI || null;
 
-  const currentAQI = apiAQI || demoAQI;
+  const hasLiveData =
+    Boolean(currentAQI);
 
-  const forecast = forecastData?.forecast || [];
+  const forecast =
+    forecastData?.forecast || [];
 
   const latestForecast =
     forecast.length > 0
@@ -66,23 +128,54 @@ function Dashboard() {
       ? hotspots[0]
       : null;
 
-  const zones = [
-    {
-      zone_id: "zone_001",
-      name: "Ahmedabad",
-      current_aqi: 142,
-    },
-    {
-      zone_id: "zone_002",
-      name: "Gandhinagar",
-      current_aqi: 96,
-    },
-    {
-      zone_id: "zone_003",
-      name: "Vadodara",
-      current_aqi: 118,
-    },
-  ];
+  /*
+   * Do not show old hardcoded AQI values.
+   * For now the map receives the currently
+   * selected live zone only.
+   *
+   * Later we can load all joined zones live.
+   */
+  const zones =
+    hasLiveData
+      ? [
+          {
+            zone_id:
+              currentAQI.zone_id,
+            name:
+              currentAQI.zone_name,
+            current_aqi:
+              currentAQI.aqi,
+          },
+        ]
+      : [];
+
+  const liveTimestamp =
+    currentAQI?.air_quality_timestamp ??
+    currentAQI?.weather_timestamp ??
+    currentAQI?.timestamp ??
+    null;
+
+  const formattedTime =
+    liveTimestamp
+      ? new Date(
+          liveTimestamp
+        ).toLocaleTimeString(
+          [],
+          {
+            hour:
+              "2-digit",
+            minute:
+              "2-digit",
+          }
+        )
+      : loading
+      ? "SYNCING..."
+      : "--";
+
+  const diagnosis =
+    getDiagnosis(
+      currentAQI
+    );
 
   return (
     <div>
@@ -93,181 +186,249 @@ function Dashboard() {
           </p>
 
           <h1>
-            {currentAQI.zone_name || "Air Quality"}
+            {currentAQI?.zone_name ||
+              "Air Quality"}
 
             <span className="dashboard-title-accent">
-              {" "}Air Quality
+              {" "}
+              Air Quality
             </span>
           </h1>
 
           <p>
-            Live pollution monitoring, predictive AQI intelligence,
-            hotspot detection and AI-assisted environmental analysis.
+            Live pollution monitoring,
+            predictive AQI intelligence,
+            hotspot detection and
+            AI-assisted environmental
+            analysis.
           </p>
         </div>
 
         <div className="dashboard-header-actions">
           <div
             className={
-              error
+              hasLiveData
+                ? "data-status live"
+                : error
                 ? "data-status demo"
                 : "data-status live"
             }
           >
             <span className="status-dot" />
 
-            {error
-              ? "DEMO DATA"
-              : loading
+            {loading &&
+            !hasLiveData
               ? "SYNCING"
-              : "LIVE DATA"}
+              : hasLiveData
+              ? "LIVE DATA"
+              : error
+              ? "LIVE DATA UNAVAILABLE"
+              : "CONNECTING"}
           </div>
 
           <div className="dashboard-time">
-            <span>LAST UPDATED</span>
+            <span>
+              LAST UPDATED
+            </span>
 
             <strong>
-              {new Date(
-                currentAQI.air_quality_timestamp ??
-                  currentAQI.weather_timestamp ??
-                  currentAQI.timestamp
-              ).toLocaleTimeString([], {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
+              {formattedTime}
             </strong>
           </div>
         </div>
       </div>
 
-      <div className="dashboard-stat-row">
-        <AQICard
-          aqi={currentAQI.aqi}
-          category={currentAQI.category}
-          timestamp={
-            currentAQI.air_quality_timestamp ??
-            currentAQI.weather_timestamp ??
-            currentAQI.timestamp
-          }
-        />
+      {!hasLiveData &&
+        loading && (
+          <div className="card">
+            Loading current
+            air-quality data...
+          </div>
+        )}
 
-        <PM25Card
-          pm25={currentAQI.pm25}
-          pm10={currentAQI.pm10}
-        />
+      {!hasLiveData &&
+        error && (
+          <div className="card">
+            Live AQI unavailable:
+            {" "}
+            {error}
+          </div>
+        )}
 
-        <WeatherContext
-          temperature={currentAQI.temperature}
-          humidity={currentAQI.humidity}
-          windSpeed={currentAQI.wind_speed}
-        />
+      {hasLiveData && (
+        <>
+          <div className="dashboard-stat-row">
+            <AQICard
+              aqi={
+                currentAQI.aqi
+              }
+              category={
+                currentAQI.category
+              }
+              timestamp={
+                liveTimestamp
+              }
+            />
 
-        <ForecastRiskCard
-          predictedAQI={
-            latestForecast?.predicted_aqi ?? 0
-          }
-          riskLevel={
-            latestForecast?.risk_level ?? "UNKNOWN"
-          }
-          confidence={
-            latestForecast?.confidence ?? 0
-          }
-          timestamp={
-            latestForecast?.timestamp ??
-            new Date().toISOString()
-          }
-        />
-      </div>
+            <PM25Card
+              pm25={
+                currentAQI.pm25
+              }
+              pm10={
+                currentAQI.pm10
+              }
+            />
 
-      {forecastLoading && (
-        <p>Loading forecast...</p>
-      )}
+            <WeatherContext
+              temperature={
+                currentAQI.temperature
+              }
+              humidity={
+                currentAQI.humidity
+              }
+              windSpeed={
+                currentAQI.wind_speed
+              }
+            />
 
-      {forecastError && (
-        <p>
-          Forecast unavailable: {forecastError}
-        </p>
-      )}
-
-      <div className="dashboard-main-grid">
-        <div className="dashboard-main-column">
-          <PollutionMap
-            zones={zones}
-            hotspots={hotspots}
-          />
-
-          <RiskTrajectory
-            forecast={forecast}
-          />
-
-          <div className="dashboard-two-column">
-            {primaryHotspot ? (
-              <HotspotCard
-                hotspotId={primaryHotspot.hotspot_id}
-                latitude={primaryHotspot.latitude}
-                longitude={primaryHotspot.longitude}
-                severity={primaryHotspot.severity}
-                aqi={primaryHotspot.aqi}
-                pollutants={[]}
-              />
-            ) : (
-              <div className="card">
-                {hotspotsLoading
-                  ? "Loading hotspots..."
-                  : hotspotsError
-                  ? `Hotspot error: ${hotspotsError}`
-                  : "No hotspots found."}
-              </div>
-            )}
-
-            <RiskClusters
-              clusters={[
-                {
-                  cluster_id: "cluster_001",
-                  risk_level: "HIGH",
-                  aqi: 164,
-                },
-                {
-                  cluster_id: "cluster_002",
-                  risk_level: "MODERATE",
-                  aqi: 118,
-                },
-              ]}
+            <ForecastRiskCard
+              predictedAQI={
+                latestForecast
+                  ?.predicted_aqi ??
+                0
+              }
+              riskLevel={
+                latestForecast
+                  ?.risk_level ??
+                "UNKNOWN"
+              }
+              confidence={
+                latestForecast
+                  ?.confidence ??
+                0
+              }
+              timestamp={
+                latestForecast
+                  ?.timestamp ??
+                null
+              }
             />
           </div>
-        </div>
 
-        <div className="dashboard-side-column">
-          <HealthAdvisory
-            category={currentAQI.category}
-          />
+          {forecastLoading && (
+            <p>
+              Loading
+              forecast...
+            </p>
+          )}
 
-          <SourceAttribution
-            zoneId={selectedZone}
-            aqiData={currentAQI}
-          />
+          {forecastError && (
+            <p>
+              Forecast
+              unavailable:
+              {" "}
+              {forecastError}
+            </p>
+          )}
 
-          <AIDiagnosis
-            summary="AQI is elevated due to increased particulate matter and limited wind dispersion."
-            factors={[
-              "High PM2.5 concentration",
-              "High PM10 concentration",
-              "Low wind dispersion",
-            ]}
-          />
+          <div className="dashboard-main-grid">
+            <div className="dashboard-main-column">
+              <PollutionMap
+                zones={
+                  zones
+                }
+                hotspots={
+                  hotspots
+                }
+              />
 
-          <ForecastExplanation
-            zoneId={selectedZone}
-            forecast={forecast}
-          />
-          
-        </div>
-      </div>
+              <RiskTrajectory
+                forecast={
+                  forecast
+                }
+              />
 
-      <div className="dashboard-ai-grid">
-        <AIAnalysis />
-        <AIChat />
-      </div>
+              <div className="dashboard-two-column">
+                {primaryHotspot ? (
+                  <HotspotCard
+                    hotspotId={
+                      primaryHotspot.hotspot_id
+                    }
+                    latitude={
+                      primaryHotspot.latitude
+                    }
+                    longitude={
+                      primaryHotspot.longitude
+                    }
+                    severity={
+                      primaryHotspot.severity
+                    }
+                    aqi={
+                      primaryHotspot.aqi
+                    }
+                    pollutants={
+                      []
+                    }
+                  />
+                ) : (
+                  <div className="card">
+                    {hotspotsLoading
+                      ? "Loading hotspots..."
+                      : hotspotsError
+                      ? `Hotspot error: ${hotspotsError}`
+                      : "No hotspots found."}
+                  </div>
+                )}
+
+                <RiskClusters
+                  clusters={[]}
+                />
+              </div>
+            </div>
+
+            <div className="dashboard-side-column">
+              <HealthAdvisory
+                category={
+                  currentAQI.category
+                }
+              />
+
+              <SourceAttribution
+                zoneId={
+                  selectedZone
+                }
+                aqiData={
+                  currentAQI
+                }
+              />
+
+              <AIDiagnosis
+                summary={
+                  diagnosis.summary
+                }
+                factors={
+                  diagnosis.factors
+                }
+              />
+
+              <ForecastExplanation
+                zoneId={
+                  selectedZone
+                }
+                forecast={
+                  forecast
+                }
+              />
+            </div>
+          </div>
+
+          <div className="dashboard-ai-grid">
+            <AIAnalysis />
+
+            <AIChat />
+          </div>
+        </>
+      )}
     </div>
   );
 }
