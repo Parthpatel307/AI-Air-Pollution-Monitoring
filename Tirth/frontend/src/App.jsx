@@ -22,6 +22,7 @@ import CitizenView from "./pages/CitizenView";
 import AuthorityMode from "./pages/AuthorityMode";
 import EvidenceAnalysis from "./pages/EvidenceAnalysis";
 
+
 function AppLayout() {
   return (
     <>
@@ -35,13 +36,25 @@ function AppLayout() {
   );
 }
 
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
+
         {/* =========================
-            PUBLIC ROUTES
+            PUBLIC ENTRY
         ========================== */}
+
+        <Route
+          path="/"
+          element={
+            <Navigate
+              to="/login"
+              replace
+            />
+          }
+        />
 
         <Route
           path="/login"
@@ -58,6 +71,7 @@ function App() {
           element={<AuthorityLogin />}
         />
 
+
         {/* =========================
             AUTHENTICATED APP
         ========================== */}
@@ -69,16 +83,6 @@ function App() {
             </ProtectedRoute>
           }
         >
-          <Route
-            path="/"
-            element={
-              <Navigate
-                to="/dashboard"
-                replace
-              />
-            }
-          />
-
           <Route
             path="/dashboard"
             element={<Dashboard />}
@@ -94,9 +98,8 @@ function App() {
             element={<History />}
           />
 
-          {/* =========================
-              CITIZEN ONLY
-          ========================== */}
+
+          {/* CITIZEN ONLY */}
 
           <Route
             path="/citizen"
@@ -111,9 +114,8 @@ function App() {
             }
           />
 
-          {/* =========================
-              AUTHORITY / ADMIN ONLY
-          ========================== */}
+
+          {/* AUTHORITY / ADMIN */}
 
           <Route
             path="/authority"
@@ -144,6 +146,7 @@ function App() {
           />
         </Route>
 
+
         {/* =========================
             UNKNOWN ROUTES
         ========================== */}
@@ -161,5 +164,6 @@ function App() {
     </BrowserRouter>
   );
 }
+
 
 export default App;

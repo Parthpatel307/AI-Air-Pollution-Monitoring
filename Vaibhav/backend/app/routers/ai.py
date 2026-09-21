@@ -834,10 +834,13 @@ def ai_analyze(
         ](
             zone_id=zone_id,
 
+            zone_name=context[
+                "zone_name"
+            ],
+
             aqi=context[
                 "aqi"
             ],
-
             pm25=context[
                 "pm25"
             ],

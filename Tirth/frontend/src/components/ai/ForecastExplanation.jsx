@@ -1,8 +1,14 @@
-import { useEffect, useState } from "react";
-import { explainForecast } from "../../services/aiService";
+import {
+  useEffect,
+  useState,
+} from "react";
+
+import {
+  explainForecast,
+} from "../../services/aiService";
 
 
-function isQuotaError(error) {
+function isTemporaryAIError(error) {
   const message =
     String(
       error?.message ??
@@ -12,46 +18,80 @@ function isQuotaError(error) {
 
   return (
     message.includes("429") ||
+    message.includes("503") ||
     message.includes("resource_exhausted") ||
+    message.includes("unavailable") ||
+    message.includes("high demand") ||
     message.includes("quota") ||
-    message.includes("rate limit")
+    message.includes("rate limit") ||
+    message.includes("temporarily unavailable")
   );
 }
 
 
-function getErrorMessage(error) {
-  if (isQuotaError(error)) {
+function getCleanErrorMessage(error) {
+  if (
+    isTemporaryAIError(
+      error
+    )
+  ) {
     return (
-      "AI explanation is temporarily unavailable because the " +
-      "AI request limit has been reached. Live forecast data " +
-      "is still available."
+      "AI explanation is temporarily unavailable. " +
+      "Showing the live forecast fallback instead."
     );
   }
 
-  const value =
-    error?.message ?? error;
-
-  if (
-    typeof value === "string"
-  ) {
-    return value;
-  }
-
-  if (
-    value?.detail?.error?.message
-  ) {
-    return value.detail.error.message;
-  }
-
-  if (
-    value?.error?.message
-  ) {
-    return value.error.message;
-  }
-
   return (
-    "AI forecast explanation is temporarily unavailable."
+    "AI explanation is temporarily unavailable. " +
+    "Live forecast data is still available."
   );
+}
+
+
+function cleanAIText(text) {
+  if (!text) {
+    return "";
+  }
+
+  return String(text)
+    /*
+     * Remove markdown formatting.
+     */
+    .replace(/\*\*/g, "")
+    .replace(/\*/g, "")
+    .replace(/__/g, "")
+    .replace(/`/g, "")
+
+    /*
+     * Do not expose internal zone IDs
+     * such as zone_001 to the user.
+     */
+    .replace(
+      /\bzone_\d+\b/gi,
+      "the selected zone"
+    )
+
+    /*
+     * Clean repeated spaces.
+     */
+    .replace(/[ \t]+/g, " ")
+
+    /*
+     * Make section labels easier to read.
+     */
+    .replace(
+      /Prediction:/gi,
+      "\nPrediction:"
+    )
+    .replace(
+      /Risk Increase:/gi,
+      "\nRisk Increase:"
+    )
+    .replace(
+      /Influencing Factors & Confidence:/gi,
+      "\nInfluencing Factors & Confidence:"
+    )
+    .trim();
 }
 
 
@@ -67,10 +107,11 @@ function getFallbackExplanation(
 
   const values =
     forecast
-      .map((item) =>
-        Number(
-          item?.predicted_aqi
-        )
+      .map(
+        (item) =>
+          Number(
+            item?.predicted_aqi
+          )
       )
       .filter(
         (value) =>
@@ -78,10 +119,12 @@ function getFallbackExplanation(
       );
 
 
-  if (values.length === 0) {
+  if (
+    values.length === 0
+  ) {
     return (
-      "Live forecast data is available, but an AQI trend " +
-      "could not be calculated."
+      "Live forecast data is available, " +
+      "but an AQI trend could not be calculated."
     );
   }
 
@@ -95,10 +138,14 @@ function getFallbackExplanation(
     ];
 
   const peak =
-    Math.max(...values);
+    Math.max(
+      ...values
+    );
 
   const lowest =
-    Math.min(...values);
+    Math.min(
+      ...values
+    );
 
   const difference =
     last - first;
@@ -107,7 +154,9 @@ function getFallbackExplanation(
   let trend =
     "remain relatively stable";
 
-  if (difference >= 10) {
+  if (
+    difference >= 10
+  ) {
     trend =
       "increase over the forecast period";
   } else if (
@@ -128,7 +177,7 @@ function getFallbackExplanation(
 
 
 function ForecastExplanation({
-  zoneId = "zone_001",
+  zoneId,
   forecast = [],
 }) {
   const [
@@ -164,13 +213,16 @@ function ForecastExplanation({
     async function loadExplanation() {
       if (
         !zoneId ||
-        !forecast ||
+        !Array.isArray(
+          forecast
+        ) ||
         forecast.length === 0
       ) {
         setExplanation("");
         setKeyFactors([]);
         setError("");
         setUsingFallback(false);
+
         return;
       }
 
@@ -198,23 +250,52 @@ function ForecastExplanation({
           response;
 
 
-        setExplanation(
+        const aiExplanation =
           data?.explanation ||
           data?.summary ||
-          data?.analysis ||
-          getFallbackExplanation(
-            forecast
-          )
-        );
+          data?.analysis;
 
 
-        setKeyFactors(
+        if (aiExplanation) {
+          setExplanation(
+            cleanAIText(
+              aiExplanation
+            )
+          );
+
+          setUsingFallback(
+            false
+          );
+        } else {
+          setExplanation(
+            getFallbackExplanation(
+              forecast
+            )
+          );
+
+          setUsingFallback(
+            true
+          );
+        }
+
+
+        const factors =
           Array.isArray(
             data?.key_factors
           )
             ? data.key_factors
-            : []
+            : [];
+
+
+        setKeyFactors(
+          factors.map(
+            (factor) =>
+              cleanAIText(
+                factor
+              )
+          )
         );
+
       } catch (err) {
         if (cancelled) {
           return;
@@ -227,44 +308,34 @@ function ForecastExplanation({
         );
 
 
-        const quotaExceeded =
-          isQuotaError(err);
+        setError(
+          getCleanErrorMessage(
+            err
+          )
+        );
 
 
-        if (quotaExceeded) {
-          setError(
-            getErrorMessage(err)
-          );
+        setExplanation(
+          getFallbackExplanation(
+            forecast
+          )
+        );
 
-          setExplanation(
-            getFallbackExplanation(
-              forecast
-            )
-          );
 
-          setKeyFactors([
-            "Live AQI forecast remains available",
-            "AI explanation will resume when API quota becomes available",
-          ]);
+        setKeyFactors(
+          []
+        );
 
-          setUsingFallback(true);
-        } else {
-          setError(
-            getErrorMessage(err)
-          );
 
-          setExplanation(
-            getFallbackExplanation(
-              forecast
-            )
-          );
+        setUsingFallback(
+          true
+        );
 
-          setKeyFactors([]);
-          setUsingFallback(true);
-        }
       } finally {
         if (!cancelled) {
-          setLoading(false);
+          setLoading(
+            false
+          );
         }
       }
     }
@@ -276,6 +347,7 @@ function ForecastExplanation({
     return () => {
       cancelled = true;
     };
+
   }, [
     zoneId,
     forecast,
@@ -286,11 +358,17 @@ function ForecastExplanation({
     <section>
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
+          display:
+            "flex",
+
+          alignItems:
+            "center",
+
           justifyContent:
             "space-between",
-          gap: "12px",
+
+          gap:
+            "12px",
         }}
       >
         <h2>
@@ -302,20 +380,26 @@ function ForecastExplanation({
           style={{
             padding:
               "5px 9px",
+
             borderRadius:
               "20px",
+
             fontSize:
               "10px",
+
             fontWeight:
               700,
+
             background:
               usingFallback
                 ? "rgba(251,191,36,.08)"
                 : "rgba(45,212,191,.08)",
+
             border:
               usingFallback
                 ? "1px solid rgba(251,191,36,.2)"
                 : "1px solid rgba(45,212,191,.2)",
+
             color:
               usingFallback
                 ? "#fbbf24"
@@ -341,18 +425,25 @@ function ForecastExplanation({
               style={{
                 marginBottom:
                   "14px",
+
                 padding:
                   "11px 12px",
+
                 borderRadius:
                   "10px",
+
                 background:
                   "rgba(251,191,36,.06)",
+
                 border:
                   "1px solid rgba(251,191,36,.15)",
+
                 color:
                   "#d9c98f",
+
                 fontSize:
                   "13px",
+
                 lineHeight:
                   1.5,
               }}
@@ -362,7 +453,15 @@ function ForecastExplanation({
           )}
 
 
-          <p>
+          <p
+            style={{
+              whiteSpace:
+                "pre-line",
+
+              lineHeight:
+                1.6,
+            }}
+          >
             {explanation ||
               "No explanation available yet."}
           </p>

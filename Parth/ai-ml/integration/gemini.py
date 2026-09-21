@@ -4,6 +4,7 @@ from gemini.analysis import (
     analyze_air_quality,
     explain_forecast,
 )
+
 from gemini.chat import chat
 
 
@@ -20,13 +21,12 @@ def run_air_quality_analysis(
     humidity: float,
     wind_speed: float,
     question: str,
+    zone_name: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Public interface for grounded Gemini air-quality analysis.
-    """
 
     return analyze_air_quality(
         zone_id=zone_id,
+        zone_name=zone_name,
         aqi=aqi,
         pm25=pm25,
         pm10=pm10,
@@ -48,16 +48,17 @@ def run_forecast_explanation(
     confidence: float,
     key_factors: list[str],
 ) -> dict[str, Any]:
-    """
-    Public interface for explaining an existing ML forecast.
-    """
 
     return explain_forecast(
         zone_id=zone_id,
-        predicted_aqi=predicted_aqi,
-        risk_level=risk_level,
-        confidence=confidence,
-        key_factors=key_factors,
+        predicted_aqi=
+            predicted_aqi,
+        risk_level=
+            risk_level,
+        confidence=
+            confidence,
+        key_factors=
+            key_factors,
     )
 
 
@@ -67,9 +68,6 @@ def run_chat(
     zone_id: str,
     context: dict[str, Any],
 ) -> dict[str, Any]:
-    """
-    Public interface for grounded Gemini chat.
-    """
 
     return chat(
         message=message,
