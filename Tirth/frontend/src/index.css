@@ -7408,3 +7408,168 @@ tbody tr:hover {
     max-height: 260px;
   }
 }
+
+
+/* =========================================================
+   SATELLITE INTELLIGENCE
+   ========================================================= */
+
+.satellite-card {
+  margin-top: 24px;
+  margin-bottom: 24px;
+  padding: 22px;
+  border: 1px solid rgba(100, 116, 139, 0.22);
+  border-radius: 18px;
+  background: rgba(15, 23, 42, 0.72);
+  backdrop-filter: blur(14px);
+}
+
+.satellite-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.satellite-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.satellite-title-row h2 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.satellite-header p {
+  margin: 7px 0 0;
+  font-size: 13px;
+  color: #94a3b8;
+}
+
+.satellite-source-badge {
+  padding: 7px 10px;
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #7dd3fc;
+  background: rgba(14, 165, 233, 0.08);
+  white-space: nowrap;
+}
+
+.satellite-zone-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 30px;
+  padding: 14px 0;
+  border-top: 1px solid rgba(100, 116, 139, 0.16);
+  border-bottom: 1px solid rgba(100, 116, 139, 0.16);
+}
+
+.satellite-zone-row div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.satellite-zone-row span,
+.satellite-metric span {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #64748b;
+}
+
+.satellite-zone-row strong {
+  font-size: 14px;
+}
+
+.satellite-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.satellite-metric {
+  padding: 16px;
+  border: 1px solid rgba(100, 116, 139, 0.16);
+  border-radius: 14px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.satellite-metric-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  margin-bottom: 12px;
+  border-radius: 10px;
+  background: rgba(56, 189, 248, 0.1);
+  color: #7dd3fc;
+}
+
+.satellite-metric strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.satellite-metric small {
+  display: block;
+  margin-top: 4px;
+  color: #94a3b8;
+  font-size: 11px;
+}
+
+.satellite-metric .satellite-time {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.satellite-note {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: rgba(30, 41, 59, 0.55);
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.satellite-note strong {
+  color: #cbd5e1;
+}
+
+.satellite-footer {
+  margin-top: 12px;
+  font-size: 11px;
+  color: #64748b;
+}
+
+.satellite-state {
+  padding: 24px;
+  text-align: center;
+  color: #94a3b8;
+}
+
+.satellite-error {
+  color: #fca5a5;
+}
+
+@media (max-width: 900px) {
+  .satellite-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .satellite-header {
+    flex-direction: column;
+  }
+}

@@ -1,13 +1,25 @@
-"""AI routes."""
+﻿"""AI routes."""
 
 from pathlib import Path
 import sys
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    status,
+)
 
-from app.database import get_firestore
-from app.dependencies import require_roles
+from app.database import (
+    get_firestore,
+)
+
+from app.dependencies import (
+    require_roles,
+)
+
 from app.integrations.open_meteo import (
     get_live_environment_data,
 )
@@ -19,23 +31,41 @@ router = APIRouter(
 )
 
 
-# ---------------------------------------------------------
-# Parth AI/ML integration path
-# ---------------------------------------------------------
+# =========================================================
+# PARTH AI/ML INTEGRATION PATH
+# =========================================================
 
-REPO_ROOT = Path(__file__).resolve().parents[4]
-PARTH_AI_ML_PATH = REPO_ROOT / "Parth" / "ai-ml"
+REPO_ROOT = (
+    Path(__file__)
+    .resolve()
+    .parents[4]
+)
 
-if str(PARTH_AI_ML_PATH) not in sys.path:
+PARTH_AI_ML_PATH = (
+    REPO_ROOT /
+    "Parth" /
+    "ai-ml"
+)
+
+
+if (
+    str(
+        PARTH_AI_ML_PATH
+    )
+    not in sys.path
+):
     sys.path.insert(
         0,
-        str(PARTH_AI_ML_PATH),
+        str(
+            PARTH_AI_ML_PATH
+        ),
     )
 
 
 def _load_parth_integrations():
     """
-    Lazy-load Parth AI/ML public integration functions.
+    Lazy-load Parth AI/ML
+    public integration functions.
     """
 
     try:
@@ -54,29 +84,44 @@ def _load_parth_integrations():
         )
 
         return {
-            "air_quality": run_air_quality_analysis,
-            "forecast_explanation": run_forecast_explanation,
-            "chat": run_chat,
-            "source_detection": run_source_detection,
-            "evidence": run_evidence_analysis,
+            "air_quality":
+                run_air_quality_analysis,
+
+            "forecast_explanation":
+                run_forecast_explanation,
+
+            "chat":
+                run_chat,
+
+            "source_detection":
+                run_source_detection,
+
+            "evidence":
+                run_evidence_analysis,
         }
 
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            status_code=
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "AI_MODULE_LOAD_FAILED",
-                    "message": str(exc),
+                    "code":
+                        "AI_MODULE_LOAD_FAILED",
+
+                    "message":
+                        str(exc),
                 },
             },
         ) from exc
 
 
-# ---------------------------------------------------------
-# Common helpers
-# ---------------------------------------------------------
+# =========================================================
+# COMMON HELPERS
+# =========================================================
 
 def _number(
     data: dict[str, Any],
@@ -92,7 +137,9 @@ def _number(
         return default
 
     try:
-        return float(value)
+        return float(
+            value
+        )
 
     except (
         TypeError,
@@ -101,41 +148,134 @@ def _number(
         return default
 
 
+def _is_temporary_ai_error(
+    exc: Exception,
+) -> bool:
+    message = str(
+        exc
+    ).lower()
+
+    temporary_markers = (
+        "429",
+        "503",
+        "resource_exhausted",
+        "quota",
+        "rate limit",
+        "rate_limit",
+        "too many requests",
+        "unavailable",
+        "high demand",
+        "temporarily unavailable",
+        "service unavailable",
+    )
+
+    return any(
+        marker in message
+        for marker
+        in temporary_markers
+    )
+
+
+def _raise_ai_error(
+    exc: Exception,
+    *,
+    failure_code: str,
+) -> None:
+    """
+    Convert upstream Gemini temporary
+    failures into HTTP 503.
+
+    Real application failures remain 500.
+    """
+
+    temporary = (
+        _is_temporary_ai_error(
+            exc
+        )
+    )
+
+    if temporary:
+        raise HTTPException(
+            status_code=
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+
+            detail={
+                "success": False,
+
+                "error": {
+                    "code":
+                        "AI_TEMPORARILY_UNAVAILABLE",
+
+                    "message": (
+                        "AI service is temporarily "
+                        "unavailable. Live environmental "
+                        "data remains available."
+                    ),
+                },
+            },
+        ) from exc
+
+    raise HTTPException(
+        status_code=
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+
+        detail={
+            "success": False,
+
+            "error": {
+                "code":
+                    failure_code,
+
+                "message":
+                    str(exc),
+            },
+        },
+    ) from exc
+
+
 def _get_zone(
     zone_id: str,
 ) -> dict[str, Any]:
-    """
-    Load zone information from Firestore.
-    """
-
     db = get_firestore()
 
     zone_document = (
-        db.collection("zones")
-        .document(zone_id)
+        db.collection(
+            "zones"
+        )
+        .document(
+            zone_id
+        )
         .get()
     )
 
-    if not zone_document.exists:
+    if (
+        not zone_document.exists
+    ):
         raise HTTPException(
             status_code=404,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "ZONE_NOT_FOUND",
-                    "message": (
-                        f"Zone '{zone_id}' was not found."
-                    ),
+                    "code":
+                        "ZONE_NOT_FOUND",
+
+                    "message":
+                        f"Zone '{zone_id}' was not found.",
                 },
             },
         )
 
     zone = (
-        zone_document.to_dict()
+        zone_document
+        .to_dict()
         or {}
     )
 
-    zone["zone_id"] = zone_id
+    zone[
+        "zone_id"
+    ] = zone_id
 
     return zone
 
@@ -144,7 +284,8 @@ def _get_latest_aqi_reading(
     zone_id: str,
 ) -> dict[str, Any]:
     """
-    Load latest stored Firestore AQI reading.
+    Load latest stored Firestore
+    AQI reading.
     """
 
     _get_zone(
@@ -154,7 +295,9 @@ def _get_latest_aqi_reading(
     db = get_firestore()
 
     documents = (
-        db.collection("aqi_readings")
+        db.collection(
+            "aqi_readings"
+        )
         .where(
             "zone_id",
             "==",
@@ -162,9 +305,12 @@ def _get_latest_aqi_reading(
         )
         .order_by(
             "timestamp",
-            direction="DESCENDING",
+            direction=
+                "DESCENDING",
         )
-        .limit(1)
+        .limit(
+            1
+        )
         .stream()
     )
 
@@ -175,10 +321,14 @@ def _get_latest_aqi_reading(
     if not readings:
         raise HTTPException(
             status_code=404,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "AQI_DATA_NOT_FOUND",
+                    "code":
+                        "AQI_DATA_NOT_FOUND",
+
                     "message": (
                         "No AQI data found for zone "
                         f"'{zone_id}'."
@@ -188,7 +338,8 @@ def _get_latest_aqi_reading(
         )
 
     return (
-        readings[0].to_dict()
+        readings[0]
+        .to_dict()
         or {}
     )
 
@@ -197,16 +348,19 @@ def _get_live_ai_context(
     zone_id: str,
 ) -> dict[str, Any]:
     """
-    Get live/current air-quality + weather data.
+    Live/current environmental data.
 
-    Open-Meteo is the primary source.
-    Firestore is used as a fallback if live data
-    is temporarily unavailable.
+    Primary:
+        Open-Meteo
+
+    Fallback:
+        Latest stored Firestore reading
     """
 
     zone = _get_zone(
         zone_id
     )
+
 
     latitude = zone.get(
         "latitude"
@@ -216,16 +370,21 @@ def _get_live_ai_context(
         "longitude"
     )
 
+
     if (
         latitude is None
         or longitude is None
     ):
         raise HTTPException(
             status_code=400,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "ZONE_COORDINATES_MISSING",
+                    "code":
+                        "ZONE_COORDINATES_MISSING",
+
                     "message": (
                         "Latitude and longitude are "
                         "required for live AI data."
@@ -233,6 +392,7 @@ def _get_live_ai_context(
                 },
             },
         )
+
 
     try:
         latitude = float(
@@ -249,10 +409,14 @@ def _get_live_ai_context(
     ) as exc:
         raise HTTPException(
             status_code=400,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "INVALID_ZONE_COORDINATES",
+                    "code":
+                        "INVALID_ZONE_COORDINATES",
+
                     "message": (
                         "Zone latitude or longitude "
                         "is invalid."
@@ -261,17 +425,22 @@ def _get_live_ai_context(
             },
         ) from exc
 
+
     # -----------------------------------------------------
-    # Primary source: Open-Meteo
+    # PRIMARY: OPEN-METEO
     # -----------------------------------------------------
 
     try:
         live_data = (
             get_live_environment_data(
-                latitude=latitude,
-                longitude=longitude,
+                latitude=
+                    latitude,
+
+                longitude=
+                    longitude,
             )
         )
+
 
         air_quality = (
             live_data.get(
@@ -280,6 +449,7 @@ def _get_live_ai_context(
             or {}
         )
 
+
         weather = (
             live_data.get(
                 "weather"
@@ -287,250 +457,306 @@ def _get_live_ai_context(
             or {}
         )
 
+
         return {
-            "zone_id": zone_id,
+            "zone_id":
+                zone_id,
 
-            "zone_name": str(
-                zone.get(
-                    "name",
-                    zone_id,
-                )
-            ),
+            "zone_name":
+                str(
+                    zone.get(
+                        "name",
+                        zone_id,
+                    )
+                ),
 
-            "latitude": latitude,
-            "longitude": longitude,
+            "latitude":
+                latitude,
 
-            "data_source": (
-                "open_meteo_live"
-            ),
+            "longitude":
+                longitude,
 
-            "aqi": _number(
-                air_quality,
-                "aqi",
-            ),
+            "data_source":
+                "open_meteo_live",
 
-            "category": str(
-                air_quality.get(
-                    "category",
-                    "UNKNOWN",
-                )
-            ),
+            "aqi":
+                _number(
+                    air_quality,
+                    "aqi",
+                ),
 
-            "pm25": _number(
-                air_quality,
-                "pm25",
-            ),
+            "category":
+                str(
+                    air_quality.get(
+                        "category",
+                        "UNKNOWN",
+                    )
+                ),
 
-            "pm10": _number(
-                air_quality,
-                "pm10",
-            ),
+            "pm25":
+                _number(
+                    air_quality,
+                    "pm25",
+                ),
 
-            "no2": _number(
-                air_quality,
-                "no2",
-            ),
+            "pm10":
+                _number(
+                    air_quality,
+                    "pm10",
+                ),
 
-            "so2": _number(
-                air_quality,
-                "so2",
-            ),
+            "no2":
+                _number(
+                    air_quality,
+                    "no2",
+                ),
 
-            "co": _number(
-                air_quality,
-                "co",
-            ),
+            "so2":
+                _number(
+                    air_quality,
+                    "so2",
+                ),
 
-            "o3": _number(
-                air_quality,
-                "o3",
-            ),
+            "co":
+                _number(
+                    air_quality,
+                    "co",
+                ),
 
-            "temperature": _number(
-                weather,
-                "temperature",
-            ),
+            "o3":
+                _number(
+                    air_quality,
+                    "o3",
+                ),
 
-            "humidity": _number(
-                weather,
-                "humidity",
-            ),
+            "temperature":
+                _number(
+                    weather,
+                    "temperature",
+                ),
 
-            "wind_speed": _number(
-                weather,
-                "wind_speed",
-            ),
+            "humidity":
+                _number(
+                    weather,
+                    "humidity",
+                ),
 
-            "wind_direction": _number(
-                weather,
-                "wind_direction",
-            ),
+            "wind_speed":
+                _number(
+                    weather,
+                    "wind_speed",
+                ),
 
-            "feels_like": _number(
-                weather,
-                "feels_like",
-            ),
+            "wind_direction":
+                _number(
+                    weather,
+                    "wind_direction",
+                ),
 
-            "cloud_cover": _number(
-                weather,
-                "cloud_cover",
-            ),
+            "feels_like":
+                _number(
+                    weather,
+                    "feels_like",
+                ),
 
-            "risk_level": str(
-                zone.get(
-                    "risk_level",
-                    "UNKNOWN",
-                )
-            ),
+            "cloud_cover":
+                _number(
+                    weather,
+                    "cloud_cover",
+                ),
 
-            "air_quality_timestamp": (
+            "risk_level":
+                str(
+                    zone.get(
+                        "risk_level",
+                        "UNKNOWN",
+                    )
+                ),
+
+            "air_quality_timestamp":
                 air_quality.get(
                     "timestamp"
-                )
-            ),
+                ),
 
-            "weather_timestamp": (
+            "weather_timestamp":
                 weather.get(
                     "timestamp"
-                )
-            ),
+                ),
         }
+
 
     except HTTPException:
         raise
 
+
     except Exception:
         # -------------------------------------------------
-        # Fallback: existing Firestore AQI data
+        # FIRESTORE FALLBACK
+        #
+        # Important:
+        # do NOT recursively call
+        # _get_live_ai_context here.
         # -------------------------------------------------
 
         try:
-            reading = _get_live_ai_context(
-                zone_id
+            reading = (
+                _get_latest_aqi_reading(
+                    zone_id
+                )
             )
+
         except Exception:
             reading = {}
 
-        timestamp = reading.get(
-            "timestamp"
+
+        timestamp = (
+            reading.get(
+                "timestamp"
+            )
         )
 
-        if timestamp is not None:
+
+        if (
+            timestamp is not None
+        ):
             timestamp = str(
                 timestamp
             )
 
+
         return {
-            "zone_id": zone_id,
+            "zone_id":
+                zone_id,
 
-            "zone_name": str(
-                zone.get(
-                    "name",
-                    zone_id,
-                )
-            ),
+            "zone_name":
+                str(
+                    zone.get(
+                        "name",
+                        zone_id,
+                    )
+                ),
 
-            "latitude": latitude,
-            "longitude": longitude,
+            "latitude":
+                latitude,
 
-            "data_source": (
-                "firestore_fallback"
-            ),
+            "longitude":
+                longitude,
 
-            "aqi": _number(
-                reading,
-                "aqi",
-            ),
+            "data_source":
+                "firestore_fallback",
 
-            "category": str(
-                reading.get(
-                    "category",
-                    "UNKNOWN",
-                )
-            ),
+            "aqi":
+                _number(
+                    reading,
+                    "aqi",
+                ),
 
-            "pm25": _number(
-                reading,
-                "pm25",
-            ),
+            "category":
+                str(
+                    reading.get(
+                        "category",
+                        "UNKNOWN",
+                    )
+                ),
 
-            "pm10": _number(
-                reading,
-                "pm10",
-            ),
+            "pm25":
+                _number(
+                    reading,
+                    "pm25",
+                ),
 
-            "no2": _number(
-                reading,
-                "no2",
-            ),
+            "pm10":
+                _number(
+                    reading,
+                    "pm10",
+                ),
 
-            "so2": _number(
-                reading,
-                "so2",
-            ),
+            "no2":
+                _number(
+                    reading,
+                    "no2",
+                ),
 
-            "co": _number(
-                reading,
-                "co",
-            ),
+            "so2":
+                _number(
+                    reading,
+                    "so2",
+                ),
 
-            "o3": _number(
-                reading,
-                "o3",
-            ),
+            "co":
+                _number(
+                    reading,
+                    "co",
+                ),
 
-            "temperature": _number(
-                reading,
-                "temperature",
-            ),
+            "o3":
+                _number(
+                    reading,
+                    "o3",
+                ),
 
-            "humidity": _number(
-                reading,
-                "humidity",
-            ),
+            "temperature":
+                _number(
+                    reading,
+                    "temperature",
+                ),
 
-            "wind_speed": _number(
-                reading,
-                "wind_speed",
-            ),
+            "humidity":
+                _number(
+                    reading,
+                    "humidity",
+                ),
 
-            "wind_direction": _number(
-                reading,
-                "wind_direction",
-            ),
+            "wind_speed":
+                _number(
+                    reading,
+                    "wind_speed",
+                ),
 
-            "feels_like": _number(
-                reading,
-                "temperature",
-            ),
+            "wind_direction":
+                _number(
+                    reading,
+                    "wind_direction",
+                ),
 
-            "cloud_cover": _number(
-                reading,
-                "cloud_cover",
-            ),
+            "feels_like":
+                _number(
+                    reading,
+                    "temperature",
+                ),
 
-            "risk_level": str(
-                zone.get(
-                    "risk_level",
-                    "UNKNOWN",
-                )
-            ),
+            "cloud_cover":
+                _number(
+                    reading,
+                    "cloud_cover",
+                ),
 
-            "air_quality_timestamp": (
-                timestamp
-            ),
+            "risk_level":
+                str(
+                    reading.get(
+                        "risk_level",
+                        zone.get(
+                            "risk_level",
+                            "UNKNOWN",
+                        ),
+                    )
+                ),
 
-            "weather_timestamp": (
-                timestamp
-            ),
+            "air_quality_timestamp":
+                timestamp,
+
+            "weather_timestamp":
+                timestamp,
         }
 
 
-# ---------------------------------------------------------
-# Existing lightweight insight endpoint
-# ---------------------------------------------------------
+# =========================================================
+# LIGHTWEIGHT INSIGHTS
+# =========================================================
 
-@router.get("/insights")
+@router.get(
+    "/insights"
+)
 def get_ai_insights(
     zone_id: str = Query(...),
 ) -> dict:
@@ -540,61 +766,88 @@ def get_ai_insights(
         )
     )
 
+
     aqi = _number(
         reading,
         "aqi",
     )
 
+
     if aqi >= 201:
-        risk_level = "SEVERE"
+        risk_level = (
+            "SEVERE"
+        )
 
         recommendation = (
             "Avoid outdoor exposure and follow "
             "local health advisories."
         )
 
+
     elif aqi >= 151:
-        risk_level = "HIGH"
+        risk_level = (
+            "HIGH"
+        )
 
         recommendation = (
             "Reduce prolonged outdoor activity "
             "and use protective measures."
         )
 
+
     elif aqi >= 101:
-        risk_level = "MODERATE"
+        risk_level = (
+            "MODERATE"
+        )
 
         recommendation = (
             "Sensitive individuals should reduce "
             "prolonged outdoor activity."
         )
 
+
     else:
-        risk_level = "LOW"
+        risk_level = (
+            "LOW"
+        )
 
         recommendation = (
             "Air quality is relatively acceptable "
             "for normal outdoor activity."
         )
 
+
     return {
-        "success": True,
+        "success":
+            True,
+
         "data": {
-            "zone_id": zone_id,
-            "aqi": aqi,
-            "risk_level": risk_level,
-            "recommendation": recommendation,
+            "zone_id":
+                zone_id,
+
+            "aqi":
+                aqi,
+
+            "risk_level":
+                risk_level,
+
+            "recommendation":
+                recommendation,
         },
     }
 
 
-# ---------------------------------------------------------
-# Pollution source detection
-# ---------------------------------------------------------
+# =========================================================
+# POLLUTION SOURCE DETECTION
+# Authority / Admin only
+# =========================================================
 
-@router.post("/source-detection")
+@router.post(
+    "/source-detection"
+)
 def ai_source_detection(
     payload: dict,
+
     user: dict = Depends(
         require_roles(
             [
@@ -608,23 +861,31 @@ def ai_source_detection(
         _load_parth_integrations()
     )
 
-    zone_id = payload.get(
-        "zone_id"
+
+    zone_id = (
+        payload.get(
+            "zone_id"
+        )
     )
+
 
     if not zone_id:
         raise HTTPException(
             status_code=400,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "ZONE_ID_REQUIRED",
-                    "message": (
-                        "zone_id is required."
-                    ),
+                    "code":
+                        "ZONE_ID_REQUIRED",
+
+                    "message":
+                        "zone_id is required.",
                 },
             },
         )
+
 
     pollutants = (
         payload.get(
@@ -633,6 +894,7 @@ def ai_source_detection(
         or {}
     )
 
+
     weather = (
         payload.get(
             "weather"
@@ -640,11 +902,13 @@ def ai_source_detection(
         or {}
     )
 
+
     if not isinstance(
         pollutants,
         dict,
     ):
         pollutants = {}
+
 
     if not isinstance(
         weather,
@@ -652,92 +916,109 @@ def ai_source_detection(
     ):
         weather = {}
 
-    reading = _get_live_ai_context(zone_id)
+
+    reading = (
+        _get_live_ai_context(
+            zone_id
+        )
+    )
+
 
     source_input = {
-        "zone_id": zone_id,
+        "zone_id":
+            zone_id,
 
-        "aqi": _number(
-            pollutants,
-            "aqi",
+        "aqi":
             _number(
-                reading,
+                pollutants,
                 "aqi",
+                _number(
+                    reading,
+                    "aqi",
+                ),
             ),
-        ),
 
-        "pm25": _number(
-            pollutants,
-            "pm25",
+        "pm25":
             _number(
-                reading,
+                pollutants,
                 "pm25",
+                _number(
+                    reading,
+                    "pm25",
+                ),
             ),
-        ),
 
-        "pm10": _number(
-            pollutants,
-            "pm10",
+        "pm10":
             _number(
-                reading,
+                pollutants,
                 "pm10",
+                _number(
+                    reading,
+                    "pm10",
+                ),
             ),
-        ),
 
-        "no2": _number(
-            pollutants,
-            "no2",
+        "no2":
             _number(
-                reading,
+                pollutants,
                 "no2",
+                _number(
+                    reading,
+                    "no2",
+                ),
             ),
-        ),
 
-        "so2": _number(
-            pollutants,
-            "so2",
+        "so2":
             _number(
-                reading,
+                pollutants,
                 "so2",
+                _number(
+                    reading,
+                    "so2",
+                ),
             ),
-        ),
 
-        "co": _number(
-            pollutants,
-            "co",
+        "co":
             _number(
-                reading,
+                pollutants,
                 "co",
+                _number(
+                    reading,
+                    "co",
+                ),
             ),
-        ),
 
-        "temperature": _number(
-            weather,
-            "temperature",
+        "temperature":
             _number(
-                reading,
+                weather,
                 "temperature",
+                _number(
+                    reading,
+                    "temperature",
+                ),
             ),
-        ),
 
-        "humidity": _number(
-            weather,
-            "humidity",
+        "humidity":
             _number(
-                reading,
+                weather,
                 "humidity",
+                _number(
+                    reading,
+                    "humidity",
+                ),
             ),
-        ),
 
-        "wind_speed": _number(
-            weather,
-            "wind_speed",
+        "wind_speed":
             _number(
-                reading,
+                weather,
                 "wind_speed",
+                _number(
+                    reading,
+                    "wind_speed",
+                ),
             ),
-        ),
     }
+
 
     try:
         return integrations[
@@ -746,31 +1027,30 @@ def ai_source_detection(
             source_input
         )
 
+
     except HTTPException:
         raise
 
+
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error": {
-                    "code": (
-                        "SOURCE_DETECTION_FAILED"
-                    ),
-                    "message": str(exc),
-                },
-            },
-        ) from exc
+        _raise_ai_error(
+            exc,
+
+            failure_code=
+                "SOURCE_DETECTION_FAILED",
+        )
 
 
-# ---------------------------------------------------------
-# Gemini AQI analysis - LIVE DATA
-# ---------------------------------------------------------
+# =========================================================
+# GEMINI AQI ANALYSIS
+# =========================================================
 
-@router.post("/analyze")
+@router.post(
+    "/analyze"
+)
 def ai_analyze(
     payload: dict,
+
     user: dict = Depends(
         require_roles(
             [
@@ -785,101 +1065,128 @@ def ai_analyze(
         _load_parth_integrations()
     )
 
-    zone_id = payload.get(
-        "zone_id"
+
+    zone_id = (
+        payload.get(
+            "zone_id"
+        )
     )
 
-    question = payload.get(
-        "question"
+
+    question = (
+        payload.get(
+            "question"
+        )
     )
+
 
     if not zone_id:
         raise HTTPException(
             status_code=400,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "ZONE_ID_REQUIRED",
-                    "message": (
-                        "zone_id is required."
-                    ),
+                    "code":
+                        "ZONE_ID_REQUIRED",
+
+                    "message":
+                        "zone_id is required.",
                 },
             },
         )
+
 
     if not question:
         raise HTTPException(
             status_code=400,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "QUESTION_REQUIRED",
-                    "message": (
-                        "question is required."
-                    ),
+                    "code":
+                        "QUESTION_REQUIRED",
+
+                    "message":
+                        "question is required.",
                 },
             },
         )
 
-    # Live Open-Meteo context
+
     context = (
         _get_live_ai_context(
             zone_id
         )
     )
 
+
     try:
         result = integrations[
             "air_quality"
         ](
-            zone_id=zone_id,
+            zone_id=
+                zone_id,
 
-            zone_name=context[
-                "zone_name"
-            ],
+            zone_name=
+                context[
+                    "zone_name"
+                ],
 
-            aqi=context[
-                "aqi"
-            ],
-            pm25=context[
-                "pm25"
-            ],
+            aqi=
+                context[
+                    "aqi"
+                ],
 
-            pm10=context[
-                "pm10"
-            ],
+            pm25=
+                context[
+                    "pm25"
+                ],
 
-            no2=context[
-                "no2"
-            ],
+            pm10=
+                context[
+                    "pm10"
+                ],
 
-            so2=context[
-                "so2"
-            ],
+            no2=
+                context[
+                    "no2"
+                ],
 
-            co=context[
-                "co"
-            ],
+            so2=
+                context[
+                    "so2"
+                ],
 
-            temperature=context[
-                "temperature"
-            ],
+            co=
+                context[
+                    "co"
+                ],
 
-            humidity=context[
-                "humidity"
-            ],
+            temperature=
+                context[
+                    "temperature"
+                ],
 
-            wind_speed=context[
-                "wind_speed"
-            ],
+            humidity=
+                context[
+                    "humidity"
+                ],
 
-            question=str(
-                question
-            ),
+            wind_speed=
+                context[
+                    "wind_speed"
+                ],
+
+            question=
+                str(
+                    question
+                ),
         )
 
-        # Add metadata without breaking
-        # Parth's existing response contract.
+
         if isinstance(
             result,
             dict,
@@ -912,33 +1219,33 @@ def ai_analyze(
                 ],
             )
 
+
         return result
+
 
     except HTTPException:
         raise
 
+
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error": {
-                    "code": (
-                        "AI_ANALYSIS_FAILED"
-                    ),
-                    "message": str(exc),
-                },
-            },
-        ) from exc
+        _raise_ai_error(
+            exc,
+
+            failure_code=
+                "AI_ANALYSIS_FAILED",
+        )
 
 
-# ---------------------------------------------------------
-# Gemini chat - LIVE DATA
-# ---------------------------------------------------------
+# =========================================================
+# GEMINI CHAT
+# =========================================================
 
-@router.post("/chat")
+@router.post(
+    "/chat"
+)
 def ai_chat(
     payload: dict,
+
     user: dict = Depends(
         require_roles(
             [
@@ -953,41 +1260,56 @@ def ai_chat(
         _load_parth_integrations()
     )
 
-    message = payload.get(
-        "message"
+
+    message = (
+        payload.get(
+            "message"
+        )
     )
 
-    zone_id = payload.get(
-        "zone_id"
+
+    zone_id = (
+        payload.get(
+            "zone_id"
+        )
     )
+
 
     if not message:
         raise HTTPException(
             status_code=400,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "MESSAGE_REQUIRED",
-                    "message": (
-                        "message is required."
-                    ),
+                    "code":
+                        "MESSAGE_REQUIRED",
+
+                    "message":
+                        "message is required.",
                 },
             },
         )
 
+
     if not zone_id:
         raise HTTPException(
             status_code=400,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "ZONE_ID_REQUIRED",
-                    "message": (
-                        "zone_id is required."
-                    ),
+                    "code":
+                        "ZONE_ID_REQUIRED",
+
+                    "message":
+                        "zone_id is required.",
                 },
             },
         )
+
 
     context = (
         _get_live_ai_context(
@@ -995,16 +1317,23 @@ def ai_chat(
         )
     )
 
+
     try:
         result = integrations[
             "chat"
         ](
-            message=str(
-                message
-            ),
-            zone_id=zone_id,
-            context=context,
+            message=
+                str(
+                    message
+                ),
+
+            zone_id=
+                zone_id,
+
+            context=
+                context,
         )
+
 
         if isinstance(
             result,
@@ -1031,31 +1360,33 @@ def ai_chat(
                 ],
             )
 
+
         return result
+
 
     except HTTPException:
         raise
 
+
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error": {
-                    "code": "AI_CHAT_FAILED",
-                    "message": str(exc),
-                },
-            },
-        ) from exc
+        _raise_ai_error(
+            exc,
+
+            failure_code=
+                "AI_CHAT_FAILED",
+        )
 
 
-# ---------------------------------------------------------
-# Gemini forecast explanation
-# ---------------------------------------------------------
+# =========================================================
+# GEMINI FORECAST EXPLANATION
+# =========================================================
 
-@router.post("/forecast/explain")
+@router.post(
+    "/forecast/explain"
+)
 def ai_forecast_explain(
     payload: dict,
+
     user: dict = Depends(
         require_roles(
             [
@@ -1070,27 +1401,38 @@ def ai_forecast_explain(
         _load_parth_integrations()
     )
 
-    zone_id = payload.get(
-        "zone_id"
+
+    zone_id = (
+        payload.get(
+            "zone_id"
+        )
     )
 
-    forecast = payload.get(
-        "forecast"
+
+    forecast = (
+        payload.get(
+            "forecast"
+        )
     )
+
 
     if not zone_id:
         raise HTTPException(
             status_code=400,
+
             detail={
                 "success": False,
+
                 "error": {
-                    "code": "ZONE_ID_REQUIRED",
-                    "message": (
-                        "zone_id is required."
-                    ),
+                    "code":
+                        "ZONE_ID_REQUIRED",
+
+                    "message":
+                        "zone_id is required.",
                 },
             },
         )
+
 
     if isinstance(
         forecast,
@@ -1102,15 +1444,18 @@ def ai_forecast_explain(
             else {}
         )
 
+
     elif isinstance(
         forecast,
         dict,
     ):
-        forecast_item = forecast
+        forecast_item = (
+            forecast
+        )
+
 
     else:
         forecast_item = {}
-
     if not forecast_item:
         db = get_firestore()
 
@@ -1126,23 +1471,29 @@ def ai_forecast_explain(
             .order_by(
                 "timestamp"
             )
-            .limit(1)
+            .limit(
+                1
+            )
             .stream()
         )
+
 
         records = list(
             forecast_documents
         )
 
+
         if not records:
             raise HTTPException(
                 status_code=404,
+
                 detail={
                     "success": False,
+
                     "error": {
-                        "code": (
-                            "FORECAST_DATA_NOT_FOUND"
-                        ),
+                        "code":
+                            "FORECAST_DATA_NOT_FOUND",
+
                         "message": (
                             "No forecast data found "
                             f"for zone '{zone_id}'."
@@ -1151,15 +1502,21 @@ def ai_forecast_explain(
                 },
             )
 
+
         forecast_item = (
-            records[0].to_dict()
+            records[0]
+            .to_dict()
             or {}
         )
 
-    predicted_aqi = _number(
-        forecast_item,
-        "predicted_aqi",
+
+    predicted_aqi = (
+        _number(
+            forecast_item,
+            "predicted_aqi",
+        )
     )
+
 
     risk_level = str(
         forecast_item.get(
@@ -1168,10 +1525,14 @@ def ai_forecast_explain(
         )
     )
 
-    confidence = _number(
-        forecast_item,
-        "confidence",
+
+    confidence = (
+        _number(
+            forecast_item,
+            "confidence",
+        )
     )
+
 
     key_factors = (
         forecast_item.get(
@@ -1180,39 +1541,48 @@ def ai_forecast_explain(
         )
     )
 
+
     if not isinstance(
         key_factors,
         list,
     ):
         key_factors = []
 
+
     try:
         return integrations[
             "forecast_explanation"
         ](
-            zone_id=zone_id,
-            predicted_aqi=predicted_aqi,
-            risk_level=risk_level,
-            confidence=confidence,
+            zone_id=
+                zone_id,
+
+            predicted_aqi=
+                predicted_aqi,
+
+            risk_level=
+                risk_level,
+
+            confidence=
+                confidence,
+
             key_factors=[
-                str(item)
-                for item in key_factors
+                str(
+                    item
+                )
+                for item
+                in key_factors
             ],
         )
+
 
     except HTTPException:
         raise
 
+
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "success": False,
-                "error": {
-                    "code": (
-                        "FORECAST_EXPLANATION_FAILED"
-                    ),
-                    "message": str(exc),
-                },
-            },
-        ) from exc
+        _raise_ai_error(
+            exc,
+
+            failure_code=
+                "FORECAST_EXPLANATION_FAILED",
+        )

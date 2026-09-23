@@ -1,9 +1,14 @@
 import {
+  useEffect,
+} from "react";
+
+import {
   BrowserRouter,
   Navigate,
   Outlet,
   Route,
   Routes,
+  useLocation,
 } from "react-router-dom";
 
 import Header from "./components/layout/Header";
@@ -23,10 +28,107 @@ import AuthorityMode from "./pages/AuthorityMode";
 import EvidenceAnalysis from "./pages/EvidenceAnalysis";
 
 
+function HashScrollHandler() {
+  const location =
+    useLocation();
+
+
+  useEffect(() => {
+    if (
+      !location.hash
+    ) {
+      window.scrollTo({
+        top: 0,
+        left: 0,
+        behavior: "auto",
+      });
+
+      return;
+    }
+
+
+    const sectionId =
+      decodeURIComponent(
+        location.hash.substring(
+          1
+        )
+      );
+
+
+    let attempts = 0;
+
+
+    function tryScroll() {
+      const target =
+        document.getElementById(
+          sectionId
+        );
+
+
+      if (target) {
+        target.scrollIntoView({
+          behavior:
+            "smooth",
+
+          block:
+            "start",
+        });
+
+        return true;
+      }
+
+
+      return false;
+    }
+
+
+    if (
+      tryScroll()
+    ) {
+      return;
+    }
+
+
+    const timer =
+      window.setInterval(
+        () => {
+          attempts += 1;
+
+
+          if (
+            tryScroll() ||
+            attempts >= 50
+          ) {
+            window.clearInterval(
+              timer
+            );
+          }
+        },
+        100
+      );
+
+
+    return () => {
+      window.clearInterval(
+        timer
+      );
+    };
+
+  }, [
+    location.pathname,
+    location.hash,
+  ]);
+
+
+  return null;
+}
+
+
 function AppLayout() {
   return (
     <>
       <Header />
+
       <Sidebar />
 
       <PageContainer>
@@ -40,11 +142,13 @@ function AppLayout() {
 function App() {
   return (
     <BrowserRouter>
+
+      <HashScrollHandler />
+
+
       <Routes>
 
-        {/* =========================
-            PUBLIC ENTRY
-        ========================== */}
+        {/* PUBLIC ENTRY */}
 
         <Route
           path="/"
@@ -56,25 +160,32 @@ function App() {
           }
         />
 
+
         <Route
           path="/login"
-          element={<Login />}
+          element={
+            <Login />
+          }
         />
+
 
         <Route
           path="/citizen-auth"
-          element={<CitizenAuth />}
+          element={
+            <CitizenAuth />
+          }
         />
+
 
         <Route
           path="/authority-login"
-          element={<AuthorityLogin />}
+          element={
+            <AuthorityLogin />
+          }
         />
 
 
-        {/* =========================
-            AUTHENTICATED APP
-        ========================== */}
+        {/* AUTHENTICATED APP */}
 
         <Route
           element={
@@ -83,19 +194,28 @@ function App() {
             </ProtectedRoute>
           }
         >
+
           <Route
             path="/dashboard"
-            element={<Dashboard />}
+            element={
+              <Dashboard />
+            }
           />
+
 
           <Route
             path="/compare"
-            element={<CompareZones />}
+            element={
+              <CompareZones />
+            }
           />
+
 
           <Route
             path="/history"
-            element={<History />}
+            element={
+              <History />
+            }
           />
 
 
@@ -131,6 +251,7 @@ function App() {
             }
           />
 
+
           <Route
             path="/evidence"
             element={
@@ -144,12 +265,11 @@ function App() {
               </ProtectedRoute>
             }
           />
+
         </Route>
 
 
-        {/* =========================
-            UNKNOWN ROUTES
-        ========================== */}
+        {/* UNKNOWN ROUTES */}
 
         <Route
           path="*"
@@ -160,7 +280,9 @@ function App() {
             />
           }
         />
+
       </Routes>
+
     </BrowserRouter>
   );
 }

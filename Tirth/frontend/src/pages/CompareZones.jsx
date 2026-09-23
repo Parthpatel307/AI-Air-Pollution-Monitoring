@@ -1,4 +1,4 @@
-import {
+﻿import {
   useEffect,
   useMemo,
   useRef,
@@ -294,7 +294,7 @@ function ZoneDropdown({
                             "N/A"}
 
                           {zone.state
-                            ? ` • ${zone.state}`
+                            ? ` â€¢ ${zone.state}`
                             : ""}
                         </span>
                       </div>
@@ -679,7 +679,7 @@ function CompareZones() {
       </div>
 
 
-      <section className="compare-zone-picker-card">
+      <section id="compare-zone-selection" className="compare-zone-picker-card" style={{ scrollMarginTop: "110px" }}>
         <ZoneDropdown
           value={leftZoneId}
           zones={zones}
@@ -726,7 +726,7 @@ function CompareZones() {
             </div>
 
 
-            <section className="card compare-direct-card">
+            <section id="compare-direct-comparison" className="card compare-direct-card" style={{ scrollMarginTop: "110px" }}>
               <div className="card-header">
                 <div>
                   <span className="card-kicker">
@@ -811,7 +811,7 @@ function CompareZones() {
             </section>
 
 
-            <section className="card compare-chart-card">
+            <section id="compare-visual-comparison" className="card compare-chart-card" style={{ scrollMarginTop: "110px" }}>
               <div className="card-header">
                 <div>
                   <span className="card-kicker">

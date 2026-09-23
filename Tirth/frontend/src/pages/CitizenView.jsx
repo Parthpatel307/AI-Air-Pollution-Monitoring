@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   Camera,
@@ -196,7 +196,7 @@ function CitizenView() {
       </div>
 
       <div className="citizen-overview-grid">
-        <section className="card citizen-alert-panel">
+        <section id="citizen-alerts" className="card citizen-alert-panel" style={{ scrollMarginTop: "110px" }}>
           <div className="card-header">
             <div>
               <span className="card-kicker">
@@ -277,14 +277,14 @@ function CitizenView() {
 
             <div>
               <span>Trend</span>
-              <strong>↑ 8%</strong>
+              <strong>â†‘ 8%</strong>
             </div>
           </div>
         </section>
       </div>
 
       <div className="citizen-workspace">
-        <section className="card citizen-report-card">
+        <section id="citizen-report" className="card citizen-report-card" style={{ scrollMarginTop: "110px" }}>
           <div className="card-header">
             <div>
               <span className="card-kicker">
@@ -405,7 +405,7 @@ function CitizenView() {
                 ? "Submitting..."
                 : "Submit Environmental Report"}
 
-              <span>→</span>
+              <span>â†’</span>
             </button>
 
             {reportError && (
@@ -440,7 +440,7 @@ function CitizenView() {
           </form>
         </section>
 
-        <section className="card citizen-evidence-card">
+        <section id="citizen-evidence" className="card citizen-evidence-card" style={{ scrollMarginTop: "110px" }}>
           <div className="card-header">
             <div>
               <span className="card-kicker">
@@ -486,7 +486,7 @@ function CitizenView() {
                 </strong>
 
                 <span>
-                  Image, video or PDF • evidence remains private by default
+                  Image, video or PDF â€¢ evidence remains private by default
                 </span>
               </div>
             )}
@@ -527,7 +527,7 @@ function CitizenView() {
               ? "Uploading Evidence..."
               : "Upload Evidence"}
 
-            <span>→</span>
+            <span>â†’</span>
           </button>
 
           {evidenceError && (

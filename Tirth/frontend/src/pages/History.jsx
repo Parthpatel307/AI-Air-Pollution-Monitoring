@@ -1,4 +1,4 @@
-import {
+﻿import {
   useMemo,
   useState,
 } from "react";
@@ -419,7 +419,7 @@ function History() {
       </div>
 
 
-      <div className="history-summary-grid">
+      <div id="history-overview" className="history-summary-grid" style={{ scrollMarginTop: "110px" }}>
         <section className="card history-summary-card">
           <span>
             Average AQI
@@ -462,7 +462,7 @@ function History() {
           </strong>
 
           <small>
-            µg/m³
+            Âµg/mÂ³
           </small>
         </section>
 
@@ -498,7 +498,7 @@ function History() {
       </div>
 
 
-      <section className="card history-area-card">
+      <section id="history-aqi-trend" className="card history-area-card" style={{ scrollMarginTop: "110px" }}>
         <div className="card-header">
           <div>
             <span className="card-kicker">
@@ -682,7 +682,7 @@ function History() {
       </section>
 
 
-      <section className="card history-table-card">
+      <section id="history-readings" className="card history-table-card" style={{ scrollMarginTop: "110px" }}>
         <div className="card-header">
           <div>
             <span className="card-kicker">
