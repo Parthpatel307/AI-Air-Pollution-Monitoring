@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import (
     datetime,
@@ -24,6 +25,24 @@ NO2_BAND = (
     "tropospheric_NO2_column_number_density"
 )
 
+NO2_SOURCE = (
+    "Sentinel-5P / Google Earth Engine"
+)
+
+NO2_UNIT = "mol/m^2"
+
+NO2_PALETTE = [
+    "081dff",
+    "0066ff",
+    "00d9ff",
+    "00ff9d",
+    "c8ff00",
+    "ffff00",
+    "ff9d00",
+    "ff4500",
+    "ff0000",
+]
+
 
 _ee_initialized = False
 
@@ -47,9 +66,71 @@ def initialize_earth_engine() -> None:
             "EARTH_ENGINE_PROJECT is not configured."
         )
 
-    ee.Initialize(
-        project=project_id
+    credentials_path = os.getenv(
+        "GOOGLE_APPLICATION_CREDENTIALS"
     )
+
+    try:
+        # -------------------------------------------------
+        # PRODUCTION / RENDER
+        # -------------------------------------------------
+
+        if credentials_path:
+            if not os.path.exists(
+                credentials_path
+            ):
+                raise RuntimeError(
+                    "Google credentials file was not found at "
+                    f"{credentials_path}"
+                )
+
+            with open(
+                credentials_path,
+                "r",
+                encoding="utf-8",
+            ) as credential_file:
+                credential_data = json.load(
+                    credential_file
+                )
+
+            service_account_email = (
+                credential_data.get(
+                    "client_email"
+                )
+            )
+
+            if not service_account_email:
+                raise RuntimeError(
+                    "Service-account JSON does not contain "
+                    "client_email."
+                )
+
+            credentials = (
+                ee.ServiceAccountCredentials(
+                    service_account_email,
+                    credentials_path,
+                )
+            )
+
+            ee.Initialize(
+                credentials=credentials,
+                project=project_id,
+            )
+
+        # -------------------------------------------------
+        # LOCAL DEVELOPMENT
+        # -------------------------------------------------
+
+        else:
+            ee.Initialize(
+                project=project_id
+            )
+
+    except Exception as exc:
+        raise RuntimeError(
+            "Earth Engine initialization failed: "
+            f"{exc}"
+        ) from exc
 
     _ee_initialized = True
 
@@ -65,6 +146,8 @@ def _build_no2_collection(
     days: int,
     radius_m: int,
 ):
+    initialize_earth_engine()
+
     point = ee.Geometry.Point(
         [
             longitude,
@@ -118,28 +201,25 @@ def _build_no2_collection(
 def _get_latest_timestamp(
     collection,
 ):
-    timestamp_ms = (
-        collection
-        .aggregate_max(
+    latest_millis = (
+        collection.aggregate_max(
             "system:time_start"
-        )
-        .getInfo()
+        ).getInfo()
     )
 
-    if not timestamp_ms:
+    if latest_millis is None:
         return None
 
-    return (
-        datetime.fromtimestamp(
-            timestamp_ms / 1000,
-            tz=timezone.utc,
-        )
-        .isoformat()
-    )
+    return datetime.fromtimestamp(
+        float(
+            latest_millis
+        ) / 1000.0,
+        tz=timezone.utc,
+    ).isoformat()
 
 
 # =========================================================
-# NUMERIC SATELLITE NO2
+# SATELLITE NO2 VALUE
 # =========================================================
 
 def get_satellite_no2(
@@ -149,152 +229,172 @@ def get_satellite_no2(
     days: int = 5,
     radius_m: int = 30000,
 ) -> dict:
-    initialize_earth_engine()
-
-    (
-        collection,
-        _,
-        area,
-    ) = _build_no2_collection(
-        latitude=latitude,
-        longitude=longitude,
-        days=days,
-        radius_m=radius_m,
+    collection, _point, area = (
+        _build_no2_collection(
+            latitude=latitude,
+            longitude=longitude,
+            days=days,
+            radius_m=radius_m,
+        )
     )
 
-    image_count = (
-        collection
-        .size()
-        .getInfo()
+    image_count = int(
+        collection.size().getInfo()
     )
 
-    if image_count == 0:
-        return {
-            "success": False,
-            "no2": None,
-            "unit": "mol/m^2",
-            "period_days": days,
-            "radius_m": radius_m,
-            "image_count": 0,
-            "satellite_timestamp": None,
-            "source":
-                "Sentinel-5P / Google Earth Engine",
-            "message":
-                "No recent Sentinel-5P NO2 data found.",
-        }
+    if image_count <= 0:
+        raise RuntimeError(
+            "No Sentinel-5P NO2 images were found "
+            "for the selected area and period."
+        )
 
     mean_image = (
         collection.mean()
     )
 
-    result = (
-        mean_image.reduceRegion(
-            reducer=
-                ee.Reducer.mean(),
+    reduction = mean_image.reduceRegion(
+        reducer=ee.Reducer.mean(),
+        geometry=area,
+        scale=2000,
+        bestEffort=True,
+        maxPixels=100_000_000,
+    ).getInfo()
 
-            geometry=
-                area,
-
-            scale=
-                2000,
-
-            bestEffort=
-                True,
-
-            maxPixels=
-                10000000,
-        )
-        .getInfo()
-    )
-
-    no2 = result.get(
+    no2_value = reduction.get(
         NO2_BAND
     )
 
+    if no2_value is None:
+        raise RuntimeError(
+            "Sentinel-5P returned no usable NO2 value "
+            "for the selected area."
+        )
+
+    satellite_timestamp = (
+        _get_latest_timestamp(
+            collection
+        )
+    )
+
     return {
-        "success":
-            no2 is not None,
-
-        "no2":
-            no2,
-
-        "unit":
-            "mol/m^2",
-
-        "period_days":
-            days,
-
-        "radius_m":
-            radius_m,
-
-        "image_count":
-            image_count,
-
+        "success": True,
+        "no2": float(
+            no2_value
+        ),
+        "unit": NO2_UNIT,
+        "period_days": days,
+        "radius_m": radius_m,
+        "image_count": image_count,
         "satellite_timestamp":
-            _get_latest_timestamp(
-                collection
-            ),
-
-        "source":
-            "Sentinel-5P / Google Earth Engine",
+            satellite_timestamp,
+        "source": NO2_SOURCE,
     }
 
 
 # =========================================================
-# FEATHER / SOFT CIRCLE MASK
+# VISUALIZATION RANGE
 # =========================================================
 
-def _build_feather_mask(
-    point,
-):
-    """
-    Creates a circular alpha mask.
-
-    Outer area = transparent.
-    Center area = stronger.
-    Intermediate rings create a soft fade.
-    """
-
-    rings = [
-        (60000, 0.08),
-        (57000, 0.15),
-        (54000, 0.25),
-        (50000, 0.38),
-        (46000, 0.52),
-        (42000, 0.67),
-        (38000, 0.80),
-        (34000, 0.90),
-        (30000, 1.00),
-    ]
-
-    feather_mask = (
-        ee.Image.constant(0)
+def _get_visualization_range(
+    image,
+    area,
+) -> tuple[float, float]:
+    percentile_data = (
+        image.reduceRegion(
+            reducer=ee.Reducer.percentile(
+                [
+                    10,
+                    90,
+                ]
+            ),
+            geometry=area,
+            scale=2500,
+            bestEffort=True,
+            maxPixels=100_000_000,
+        ).getInfo()
     )
 
-    for radius, opacity in rings:
-        ring_image = (
-            ee.Image.constant(
-                opacity
-            )
-            .clip(
-                point.buffer(
-                    radius
-                )
-            )
-            .unmask(0)
+    minimum = percentile_data.get(
+        f"{NO2_BAND}_p10"
+    )
+
+    maximum = percentile_data.get(
+        f"{NO2_BAND}_p90"
+    )
+
+    if (
+        minimum is None
+        or maximum is None
+    ):
+        return (
+            0.0,
+            0.0002,
         )
 
-        feather_mask = (
-            feather_mask.max(
-                ring_image
+    minimum = float(
+        minimum
+    )
+
+    maximum = float(
+        maximum
+    )
+
+    if maximum <= minimum:
+        maximum = (
+            minimum
+            + max(
+                abs(
+                    minimum
+                ) * 0.10,
+                0.000001,
             )
         )
 
-    # Smooth boundaries between rings
-    feather_mask = (
-        feather_mask
+    return (
+        minimum,
+        maximum,
+    )
+
+
+# =========================================================
+# SOFT CIRCULAR MASK
+# =========================================================
+
+def _build_soft_circle_mask(
+    *,
+    point,
+    radius_m: int,
+):
+    circle_area = (
+        point.buffer(
+            radius_m
+        )
+    )
+
+    base_mask = (
+        ee.Image.constant(
+            1
+        )
+        .clip(
+            circle_area
+        )
+        .unmask(
+            0
+        )
+    )
+
+    feather_radius = max(
+        int(
+            radius_m
+            * 0.12
+        ),
+        2500,
+    )
+
+    soft_mask = (
+        base_mask
         .focal_mean(
-            radius=2500,
+            radius=feather_radius,
             units="meters",
         )
         .clamp(
@@ -303,11 +403,14 @@ def _build_feather_mask(
         )
     )
 
-    return feather_mask
+    return (
+        circle_area,
+        soft_mask,
+    )
 
 
 # =========================================================
-# SATELLITE NO2 HEATMAP
+# SATELLITE NO2 MAP
 # =========================================================
 
 def get_satellite_no2_map(
@@ -317,49 +420,27 @@ def get_satellite_no2_map(
     days: int = 5,
     radius_m: int = 60000,
 ) -> dict:
-    initialize_earth_engine()
-
-    (
-        collection,
-        point,
-        analysis_area,
-    ) = _build_no2_collection(
-        latitude=latitude,
-        longitude=longitude,
-        days=days,
-        radius_m=radius_m,
+    collection, point, area = (
+        _build_no2_collection(
+            latitude=latitude,
+            longitude=longitude,
+            days=days,
+            radius_m=radius_m,
+        )
     )
 
-    image_count = (
-        collection
-        .size()
-        .getInfo()
+    image_count = int(
+        collection.size().getInfo()
     )
 
-    if image_count == 0:
-        return {
-            "success": False,
-            "tile_url": None,
-            "message":
-                "No recent Sentinel-5P NO2 data found.",
-        }
-
-
-    # =====================================================
-    # 5-DAY MEAN
-    # =====================================================
+    if image_count <= 0:
+        raise RuntimeError(
+            "No Sentinel-5P NO2 images were found "
+            "for the selected area and period."
+        )
 
     mean_image = (
         collection.mean()
-    )
-
-
-    # =====================================================
-    # SMOOTH RAW SATELLITE PIXELS
-    # =====================================================
-
-    smooth_image = (
-        mean_image
         .focal_mean(
             radius=2500,
             units="meters",
@@ -369,118 +450,53 @@ def get_satellite_no2_map(
         )
     )
 
-
-    # =====================================================
-    # DYNAMIC LOCAL COLOR RANGE
-    # =====================================================
-
-    stats = (
-        smooth_image.reduceRegion(
-            reducer=
-                ee.Reducer.percentile(
-                    [
-                        10,
-                        90,
-                    ]
-                ),
-
-            geometry=
-                analysis_area,
-
-            scale=
-                4000,
-
-            bestEffort=
-                True,
-
-            maxPixels=
-                10000000,
-        )
-        .getInfo()
-    )
-
-
-    minimum = stats.get(
-        f"{NO2_BAND}_p10"
-    )
-
-    maximum = stats.get(
-        f"{NO2_BAND}_p90"
-    )
-
-
-    if minimum is None:
-        minimum = 0.0
-
-    if maximum is None:
-        maximum = 0.0001
-
-    if maximum <= minimum:
-        maximum = (
-            minimum +
-            0.00001
-        )
-
-
-    # =====================================================
-    # VISUALIZE NO2
-    # =====================================================
-
-    visualized_image = (
-        smooth_image.visualize(
-            min=minimum,
-            max=maximum,
-            palette=[
-                "0015ff",
-                "005cff",
-                "00bfff",
-                "00ffff",
-                "00ff88",
-                "7dff00",
-                "ffff00",
-                "ffb000",
-                "ff6600",
-                "ff0000",
-            ],
+    minimum, maximum = (
+        _get_visualization_range(
+            mean_image,
+            area,
         )
     )
 
-
-    # =====================================================
-    # SOFT CIRCULAR ALPHA MASK
-    # =====================================================
-
-    feather_mask = (
-        _build_feather_mask(
-            point
+    circle_area, soft_mask = (
+        _build_soft_circle_mask(
+            point=point,
+            radius_m=radius_m,
         )
     )
 
-
-    final_image = (
-        visualized_image
+    display_image = (
+        mean_image
+        .clip(
+            circle_area
+        )
         .updateMask(
-            feather_mask
+            soft_mask
         )
     )
 
+    visualization = {
+        "min": minimum,
+        "max": maximum,
+        "palette":
+            NO2_PALETTE,
+    }
 
-    # =====================================================
-    # TILE URL
-    # =====================================================
-
-    map_info = (
-        final_image
-        .getMapId()
+    map_data = (
+        display_image.getMapId(
+            visualization
+        )
     )
-
 
     tile_fetcher = (
-        map_info.get(
+        map_data.get(
             "tile_fetcher"
         )
     )
 
+    if tile_fetcher is None:
+        raise RuntimeError(
+            "Earth Engine did not return a tile fetcher."
+        )
 
     tile_url = getattr(
         tile_fetcher,
@@ -488,59 +504,43 @@ def get_satellite_no2_map(
         None,
     )
 
-
     if not tile_url:
         raise RuntimeError(
             "Earth Engine did not return a tile URL."
         )
 
-
-    # =====================================================
-    # RESPONSE
-    # =====================================================
+    satellite_timestamp = (
+        _get_latest_timestamp(
+            collection
+        )
+    )
 
     return {
         "success": True,
-
         "tile_url":
             tile_url,
-
         "center": {
             "latitude":
                 latitude,
-
             "longitude":
                 longitude,
         },
-
         "period_days":
             days,
-
         "radius_m":
             radius_m,
-
         "image_count":
             image_count,
-
         "satellite_timestamp":
-            _get_latest_timestamp(
-                collection
-            ),
-
+            satellite_timestamp,
         "visualization": {
             "min":
                 minimum,
-
             "max":
                 maximum,
-
             "unit":
-                "mol/m^2",
-
-            "style":
-                "soft_circular_heatmap",
+                NO2_UNIT,
         },
-
         "source":
-            "Sentinel-5P / Google Earth Engine",
+            NO2_SOURCE,
     }
