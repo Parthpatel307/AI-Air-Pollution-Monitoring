@@ -186,10 +186,30 @@ function SatelliteMapController({
   const map = useMap();
 
   useEffect(() => {
+    // LIVE AQI mode:
+    // restore normal map zoom.
+    if (!enabled) {
+      map.setMaxZoom(14);
+      return;
+    }
+
+    // Satellite NO2 works best at regional scale.
+    // Prevent excessive zoom that stretches
+    // coarse Sentinel-5P pixels.
+    map.setMaxZoom(7);
+
     if (
-      !enabled ||
-      !center
+      map.getZoom() > 7
     ) {
+      map.setZoom(
+        7,
+        {
+          animate: true,
+        }
+      );
+    }
+
+    if (!center) {
       return;
     }
 
@@ -219,7 +239,7 @@ function SatelliteMapController({
         latitude,
         longitude,
       ],
-      9,
+      7,
       {
         duration: 1,
       }
