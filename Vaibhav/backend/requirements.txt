@@ -11,3 +11,4 @@ scikit-learn
 joblib
 python-dotenv
 google-genai
+earthengine-api==1.7.45
