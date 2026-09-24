@@ -23,17 +23,22 @@ function cleanAIText(value) {
 function isUsefulAIText(value) {
   const text = cleanAIText(value);
 
-  if (text.length < 45) {
+  if (text.length < 80) {
     return false;
   }
 
-  const lower = text.toLowerCase();
+  const lower =
+    text.toLowerCase();
 
   const badFragments = [
     "structure required",
     "required structure",
     "output structure",
     "response structure",
+    "current air quality [",
+    "[one",
+    "[two",
+    "[three",
     "no ).",
     "locations, forecasts, or",
   ];
@@ -47,10 +52,27 @@ function isUsefulAIText(value) {
     return false;
   }
 
+  // Reject unfinished JSON/template/list output.
+  if (
+    /[\[\]{}<>]/.test(text)
+  ) {
+    return false;
+  }
+
   const words =
     text.match(/[a-zA-Z]{2,}/g) || [];
 
-  return words.length >= 8;
+  if (words.length < 12) {
+    return false;
+  }
+
+  // A useful response should contain
+  // at least one complete sentence.
+  if (!/[.!?]/.test(text)) {
+    return false;
+  }
+
+  return true;
 }
 
 
