@@ -1,6 +1,7 @@
 ﻿"""AI routes."""
 
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 import sys
 from typing import Any
 
@@ -1379,7 +1380,9 @@ def ai_chat(
 
 # =========================================================
 # GEMINI FORECAST EXPLANATION
+# 60-minute persistent cache + temporary-error cooldown
 # =========================================================
+
 
 @router.post(
     "/forecast/explain"
@@ -1397,17 +1400,11 @@ def ai_forecast_explain(
         )
     ),
 ) -> dict:
-    integrations = (
-        _load_parth_integrations()
-    )
-
-
     zone_id = (
         payload.get(
             "zone_id"
         )
     )
-
 
     forecast = (
         payload.get(
@@ -1415,14 +1412,11 @@ def ai_forecast_explain(
         )
     )
 
-
     if not zone_id:
         raise HTTPException(
             status_code=400,
-
             detail={
                 "success": False,
-
                 "error": {
                     "code":
                         "ZONE_ID_REQUIRED",
@@ -1432,7 +1426,6 @@ def ai_forecast_explain(
                 },
             },
         )
-
 
     if isinstance(
         forecast,
@@ -1444,7 +1437,6 @@ def ai_forecast_explain(
             else {}
         )
 
-
     elif isinstance(
         forecast,
         dict,
@@ -1453,9 +1445,9 @@ def ai_forecast_explain(
             forecast
         )
 
-
     else:
         forecast_item = {}
+
     if not forecast_item:
         db = get_firestore()
 
@@ -1477,19 +1469,15 @@ def ai_forecast_explain(
             .stream()
         )
 
-
         records = list(
             forecast_documents
         )
 
-
         if not records:
             raise HTTPException(
                 status_code=404,
-
                 detail={
                     "success": False,
-
                     "error": {
                         "code":
                             "FORECAST_DATA_NOT_FOUND",
@@ -1502,13 +1490,11 @@ def ai_forecast_explain(
                 },
             )
 
-
         forecast_item = (
             records[0]
             .to_dict()
             or {}
         )
-
 
     predicted_aqi = (
         _number(
@@ -1517,14 +1503,12 @@ def ai_forecast_explain(
         )
     )
 
-
     risk_level = str(
         forecast_item.get(
             "risk_level",
             "UNKNOWN",
         )
     )
-
 
     confidence = (
         _number(
@@ -1533,7 +1517,6 @@ def ai_forecast_explain(
         )
     )
 
-
     key_factors = (
         forecast_item.get(
             "key_factors",
@@ -1541,16 +1524,158 @@ def ai_forecast_explain(
         )
     )
 
-
     if not isinstance(
         key_factors,
         list,
     ):
         key_factors = []
 
+    # -----------------------------------------------------
+    # Persistent Firestore cache
+    # -----------------------------------------------------
+
+    cache_ttl_minutes = 60
+    cooldown_minutes = 15
+
+    now = datetime.now(
+        timezone.utc
+    )
+
+    db = get_firestore()
+
+    cache_reference = (
+        db.collection(
+            "ai_forecast_explanation_cache"
+        )
+        .document(
+            str(zone_id)
+        )
+    )
+
+    cache_data: dict[str, Any] = {}
 
     try:
-        return integrations[
+        cache_document = (
+            cache_reference.get()
+        )
+
+        if cache_document.exists:
+            cache_data = (
+                cache_document.to_dict()
+                or {}
+            )
+
+    except Exception:
+        # Cache problems must never
+        # break the live application.
+        cache_data = {}
+
+    def is_future_datetime(
+        value: Any,
+    ) -> bool:
+        if not isinstance(
+            value,
+            datetime,
+        ):
+            return False
+
+        if value.tzinfo is None:
+            value = value.replace(
+                tzinfo=timezone.utc
+            )
+
+        return value > now
+
+    # -----------------------------------------------------
+    # CACHE HIT
+    # -----------------------------------------------------
+
+    expires_at = (
+        cache_data.get(
+            "expires_at"
+        )
+    )
+
+    cached_response = (
+        cache_data.get(
+            "response"
+        )
+    )
+
+    if (
+        is_future_datetime(
+            expires_at
+        )
+        and isinstance(
+            cached_response,
+            dict,
+        )
+    ):
+        result = dict(
+            cached_response
+        )
+
+        result[
+            "cached"
+        ] = True
+
+        result[
+            "cache_status"
+        ] = "hit"
+
+        result[
+            "cache_expires_at"
+        ] = (
+            expires_at.isoformat()
+        )
+
+        return result
+
+    # -----------------------------------------------------
+    # TEMPORARY ERROR COOLDOWN
+    #
+    # Prevent every dashboard reload from hitting Gemini
+    # again while quota/service is unavailable.
+    # -----------------------------------------------------
+
+    cooldown_until = (
+        cache_data.get(
+            "cooldown_until"
+        )
+    )
+
+    if is_future_datetime(
+        cooldown_until
+    ):
+        raise HTTPException(
+            status_code=
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "AI_TEMPORARILY_UNAVAILABLE",
+
+                    "message": (
+                        "AI explanation is temporarily "
+                        "cooling down. Live forecast "
+                        "fallback remains available."
+                    ),
+                },
+            },
+        )
+
+    # -----------------------------------------------------
+    # CACHE MISS -> only now call Gemini
+    # -----------------------------------------------------
+
+    integrations = (
+        _load_parth_integrations()
+    )
+
+    try:
+        result = integrations[
             "forecast_explanation"
         ](
             zone_id=
@@ -1574,12 +1699,103 @@ def ai_forecast_explain(
             ],
         )
 
+        # -------------------------------------------------
+        # SAVE SUCCESSFUL GEMINI RESULT FOR 60 MINUTES
+        # -------------------------------------------------
+
+        if isinstance(
+            result,
+            dict,
+        ):
+            raw_result = dict(
+                result
+            )
+
+            try:
+                cache_reference.set(
+                    {
+                        "zone_id":
+                            zone_id,
+
+                        "response":
+                            raw_result,
+
+                        "cached_at":
+                            now,
+
+                        "expires_at":
+                            now
+                            + timedelta(
+                                minutes=
+                                    cache_ttl_minutes
+                            ),
+
+                        # Expire any previous cooldown.
+                        "cooldown_until":
+                            now,
+                    },
+                    merge=True,
+                )
+
+            except Exception:
+                # Gemini success should still be returned
+                # even if Firestore cache write fails.
+                pass
+
+            result = dict(
+                result
+            )
+
+            result[
+                "cached"
+            ] = False
+
+            result[
+                "cache_status"
+            ] = "miss"
+
+            result[
+                "cache_ttl_minutes"
+            ] = (
+                cache_ttl_minutes
+            )
+
+        return result
 
     except HTTPException:
         raise
 
-
     except Exception as exc:
+        # -------------------------------------------------
+        # 429 / 503 -> stop repeated Gemini calls
+        # for the next 15 minutes.
+        # -------------------------------------------------
+
+        if _is_temporary_ai_error(
+            exc
+        ):
+            try:
+                cache_reference.set(
+                    {
+                        "zone_id":
+                            zone_id,
+
+                        "last_error_at":
+                            now,
+
+                        "cooldown_until":
+                            now
+                            + timedelta(
+                                minutes=
+                                    cooldown_minutes
+                            ),
+                    },
+                    merge=True,
+                )
+
+            except Exception:
+                pass
+
         _raise_ai_error(
             exc,
 

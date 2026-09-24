@@ -8,6 +8,83 @@ import {
 } from "../../services/aiService";
 
 
+const AI_CACHE_TTL_MS =
+  60 * 60 * 1000;
+
+const AI_COOLDOWN_MS =
+  15 * 60 * 1000;
+
+const AI_CACHE_PREFIX =
+  "airguard:forecast-ai:";
+
+
+function getCacheKey(
+  zoneId
+) {
+  return (
+    `${AI_CACHE_PREFIX}${zoneId}`
+  );
+}
+
+
+function readAIState(
+  zoneId
+) {
+  if (
+    !zoneId ||
+    typeof window === "undefined"
+  ) {
+    return null;
+  }
+
+  try {
+    const raw =
+      window.localStorage.getItem(
+        getCacheKey(
+          zoneId
+        )
+      );
+
+    if (!raw) {
+      return null;
+    }
+
+    return JSON.parse(
+      raw
+    );
+  } catch {
+    return null;
+  }
+}
+
+
+function writeAIState(
+  zoneId,
+  value
+) {
+  if (
+    !zoneId ||
+    typeof window === "undefined"
+  ) {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      getCacheKey(
+        zoneId
+      ),
+      JSON.stringify(
+        value
+      )
+    );
+  } catch {
+    // Browser storage failure must
+    // never break the dashboard.
+  }
+}
+
+
 function isTemporaryAIError(error) {
   const message =
     String(
@@ -222,6 +299,79 @@ function ForecastExplanation({
         setKeyFactors([]);
         setError("");
         setUsingFallback(false);
+        setLoading(false);
+
+        return;
+      }
+
+
+      const now =
+        Date.now();
+
+      const localState =
+        readAIState(
+          zoneId
+        );
+
+
+      // ---------------------------------------------------
+      // LOCAL CACHE HIT
+      //
+      // Same browser + same zone:
+      // do not even call backend for 60 minutes.
+      // ---------------------------------------------------
+
+      if (
+        localState?.expiresAt >
+          now &&
+        localState?.explanation
+      ) {
+        setExplanation(
+          localState.explanation
+        );
+
+        setKeyFactors(
+          Array.isArray(
+            localState.keyFactors
+          )
+            ? localState.keyFactors
+            : []
+        );
+
+        setError("");
+        setUsingFallback(false);
+        setLoading(false);
+
+        return;
+      }
+
+
+      // ---------------------------------------------------
+      // LOCAL COOLDOWN
+      //
+      // Gemini quota / 429 / 503:
+      // do not retry for 15 minutes.
+      // ---------------------------------------------------
+
+      if (
+        localState?.cooldownUntil >
+        now
+      ) {
+        setExplanation(
+          getFallbackExplanation(
+            forecast
+          )
+        );
+
+        setKeyFactors([]);
+
+        setError(
+          "AI explanation is temporarily unavailable. " +
+          "Showing the live forecast fallback instead."
+        );
+
+        setUsingFallback(true);
+        setLoading(false);
 
         return;
       }
@@ -256,16 +406,67 @@ function ForecastExplanation({
           data?.analysis;
 
 
+        const factors =
+          Array.isArray(
+            data?.key_factors
+          )
+            ? data.key_factors
+                .map(
+                  (factor) =>
+                    cleanAIText(
+                      factor
+                    )
+                )
+                .filter(Boolean)
+            : [];
+
+
         if (aiExplanation) {
-          setExplanation(
+          const cleanedExplanation =
             cleanAIText(
               aiExplanation
-            )
+            );
+
+
+          setExplanation(
+            cleanedExplanation
+          );
+
+          setKeyFactors(
+            factors
           );
 
           setUsingFallback(
             false
           );
+
+
+          // -----------------------------------------------
+          // Successful AI response:
+          // cache in this browser for 60 minutes.
+          // -----------------------------------------------
+
+          writeAIState(
+            zoneId,
+            {
+              explanation:
+                cleanedExplanation,
+
+              keyFactors:
+                factors,
+
+              cachedAt:
+                Date.now(),
+
+              expiresAt:
+                Date.now() +
+                AI_CACHE_TTL_MS,
+
+              cooldownUntil:
+                0,
+            }
+          );
+
         } else {
           setExplanation(
             getFallbackExplanation(
@@ -273,28 +474,13 @@ function ForecastExplanation({
             )
           );
 
+          setKeyFactors([]);
+
           setUsingFallback(
             true
           );
         }
 
-
-        const factors =
-          Array.isArray(
-            data?.key_factors
-          )
-            ? data.key_factors
-            : [];
-
-
-        setKeyFactors(
-          factors.map(
-            (factor) =>
-              cleanAIText(
-                factor
-              )
-          )
-        );
 
       } catch (err) {
         if (cancelled) {
@@ -330,6 +516,34 @@ function ForecastExplanation({
         setUsingFallback(
           true
         );
+
+
+        // -----------------------------------------------
+        // Temporary Gemini failure:
+        // browser should not retry repeatedly.
+        // -----------------------------------------------
+
+        if (
+          isTemporaryAIError(
+            err
+          )
+        ) {
+          writeAIState(
+            zoneId,
+            {
+              cachedAt:
+                Date.now(),
+
+              expiresAt:
+                0,
+
+              cooldownUntil:
+                Date.now() +
+                AI_COOLDOWN_MS,
+            }
+          );
+        }
+
 
       } finally {
         if (!cancelled) {
