@@ -470,6 +470,50 @@ def get_live_network() -> dict:
             )
         )
 
+        # AQI can be fresh even when Open-Meteo weather is rate-limited.
+        # In that case keep fresh AQI and reuse the last successful
+        # cached weather values.
+        try:
+            cached_weather_zones = {
+                item.get("zone_id"): item
+                for item in get_cached_network()
+                if item.get("zone_id")
+            }
+        except Exception:
+            cached_weather_zones = {}
+
+        weather_fields = (
+            "temperature",
+            "humidity",
+            "feels_like",
+            "weather_code",
+            "cloud_cover",
+            "wind_speed",
+            "wind_direction",
+            "weather_timestamp",
+            "weather_units",
+        )
+
+        for live_zone in live_zones:
+            live_zone["stale"] = False
+
+            if live_zone.get("weather_timestamp"):
+                live_zone["weather_stale"] = False
+                continue
+
+            live_zone["weather_stale"] = True
+
+            cached_weather = cached_weather_zones.get(
+                live_zone.get("zone_id")
+            )
+
+            if not cached_weather:
+                continue
+
+            for field in weather_fields:
+                if live_zone.get(field) is None:
+                    live_zone[field] = cached_weather.get(field)
+
         try:
             save_live_network(
                 live_zones
@@ -780,6 +824,75 @@ def get_live_aqi(
         or {}
     )
 
+    weather_stale = bool(
+        live_data.get(
+            "weather_stale"
+        )
+    )
+
+    if not weather.get(
+        "timestamp"
+    ):
+        try:
+            cached_weather = (
+                get_cached_zone(
+                    zone_id
+                )
+            )
+        except Exception:
+            cached_weather = None
+
+        if cached_weather:
+            weather = {
+                "temperature":
+                    cached_weather.get(
+                        "temperature"
+                    ),
+
+                "humidity":
+                    cached_weather.get(
+                        "humidity"
+                    ),
+
+                "feels_like":
+                    cached_weather.get(
+                        "feels_like"
+                    ),
+
+                "weather_code":
+                    cached_weather.get(
+                        "weather_code"
+                    ),
+
+                "cloud_cover":
+                    cached_weather.get(
+                        "cloud_cover"
+                    ),
+
+                "wind_speed":
+                    cached_weather.get(
+                        "wind_speed"
+                    ),
+
+                "wind_direction":
+                    cached_weather.get(
+                        "wind_direction"
+                    ),
+
+                "timestamp":
+                    cached_weather.get(
+                        "weather_timestamp"
+                    ),
+
+                "units":
+                    cached_weather.get(
+                        "weather_units"
+                    )
+                    or {},
+            }
+
+            weather_stale = True
+
     response_data = {
         "zone_id":
             zone_id,
@@ -812,6 +925,10 @@ def get_live_aqi(
 
         "stale":
             False,
+
+
+        "weather_stale":
+            weather_stale,
 
         "live":
             (

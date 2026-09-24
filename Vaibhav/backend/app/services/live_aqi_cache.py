@@ -24,11 +24,14 @@ def save_live_zone(
     db = get_firestore()
 
     payload = {
-        **zone,
-        "cached_at": datetime.now(
-            timezone.utc
-        ).isoformat(),
+        key: value
+        for key, value in zone.items()
+        if value is not None
     }
+
+    payload["cached_at"] = datetime.now(
+        timezone.utc
+    ).isoformat()
 
     db.collection(
         COLLECTION_NAME
@@ -74,13 +77,17 @@ def save_live_network(
             )
         )
 
+        payload = {
+            key: value
+            for key, value in zone.items()
+            if value is not None
+        }
+
+        payload["cached_at"] = cached_at
+
         batch.set(
             reference,
-            {
-                **zone,
-                "cached_at":
-                    cached_at,
-            },
+            payload,
             merge=True,
         )
 
