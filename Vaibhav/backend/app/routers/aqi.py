@@ -1,5 +1,6 @@
-"""AQI routes."""
+﻿"""AQI routes."""
 
+import logging
 import httpx
 
 from fastapi import (
@@ -30,6 +31,8 @@ from app.services.live_aqi_cache import (
     save_live_zone,
 )
 
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api/v1/aqi",
@@ -476,6 +479,13 @@ def get_live_network() -> dict:
             pass
 
     except Exception as exc:
+        logger.warning(
+            "Open-Meteo live-network failed; "
+            "using fallback cache: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+
         if not isinstance(
             exc,
             (
@@ -515,14 +525,7 @@ def get_live_network() -> dict:
                     "stale"
                 ] = True
 
-                cached_zone[
-                    "live"
-                ] = (
-                    cached_zone.get(
-                        "aqi"
-                    )
-                    is not None
-                )
+                cached_zone["live"] = False
 
                 usable_cached_zones.append(
                     cached_zone
@@ -638,6 +641,14 @@ def get_live_aqi(
         )
 
     except Exception as exc:
+        logger.warning(
+            "Open-Meteo live zone %s failed; "
+            "using fallback cache: %s: %s",
+            zone_id,
+            type(exc).__name__,
+            exc,
+        )
+
         if not isinstance(
             exc,
             (
@@ -741,9 +752,7 @@ def get_live_aqi(
                 "stale"
             ] = True
 
-            cached[
-                "live"
-            ] = True
+            cached["live"] = False
 
             return {
                 "success":
@@ -1145,3 +1154,4 @@ def get_aqi_history(
         readings=
             history,
     )
+
