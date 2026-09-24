@@ -692,8 +692,10 @@ def get_air_quality_forecast(
                 "forecast_hours":
                     safe_hours,
 
+                # Use UTC so forecast timestamps
+                # are unambiguous in backend/frontend.
                 "timezone":
-                    "auto",
+                    "GMT",
             },
         )
 
@@ -729,6 +731,23 @@ def get_air_quality_forecast(
     ):
         if aqi is None:
             continue
+
+        timestamp = str(
+            timestamp
+        )
+
+        if (
+            timestamp
+            and
+            not timestamp.endswith(
+                "Z"
+            )
+            and
+            "+" not in timestamp
+        ):
+            timestamp = (
+                f"{timestamp}Z"
+            )
 
         forecast.append(
             {

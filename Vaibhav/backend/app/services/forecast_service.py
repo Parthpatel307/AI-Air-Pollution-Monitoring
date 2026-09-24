@@ -1,6 +1,9 @@
-"""Live AQI forecast service."""
+﻿"""Live AQI forecast service."""
 
-from datetime import datetime
+from datetime import (
+    datetime,
+    timezone,
+)
 
 from fastapi import HTTPException
 
@@ -16,7 +19,7 @@ def get_forecast(
     hours: int,
 ) -> list[ForecastRecord]:
     """
-    Return live hourly AQI forecast
+    Return future hourly AQI forecast
     from Open-Meteo for the requested zone.
     """
 
@@ -34,9 +37,12 @@ def get_forecast(
             detail={
                 "success": False,
                 "error": {
-                    "code": "ZONE_NOT_FOUND",
+                    "code":
+                        "ZONE_NOT_FOUND",
+
                     "message": (
-                        f"Zone '{zone_id}' was not found."
+                        f"Zone '{zone_id}' "
+                        "was not found."
                     ),
                 },
             },
@@ -64,7 +70,9 @@ def get_forecast(
             detail={
                 "success": False,
                 "error": {
-                    "code": "ZONE_COORDINATES_MISSING",
+                    "code":
+                        "ZONE_COORDINATES_MISSING",
+
                     "message": (
                         "Latitude and longitude are "
                         "required for live forecast."
@@ -91,7 +99,9 @@ def get_forecast(
             detail={
                 "success": False,
                 "error": {
-                    "code": "INVALID_ZONE_COORDINATES",
+                    "code":
+                        "INVALID_ZONE_COORDINATES",
+
                     "message": (
                         "Zone latitude or longitude "
                         "is invalid."
@@ -100,12 +110,19 @@ def get_forecast(
             },
         ) from exc
 
+    # Ask for one extra hour because Open-Meteo
+    # can include the current hour.
+    request_hours = min(
+        int(hours) + 1,
+        168,
+    )
+
     try:
         live_forecast = (
             get_air_quality_forecast(
                 latitude=latitude,
                 longitude=longitude,
-                hours=hours,
+                hours=request_hours,
             )
         )
 
@@ -115,9 +132,9 @@ def get_forecast(
             detail={
                 "success": False,
                 "error": {
-                    "code": (
-                        "LIVE_FORECAST_UNAVAILABLE"
-                    ),
+                    "code":
+                        "LIVE_FORECAST_UNAVAILABLE",
+
                     "message": (
                         "Could not fetch live AQI "
                         "forecast from Open-Meteo."
@@ -125,6 +142,10 @@ def get_forecast(
                 },
             },
         ) from exc
+
+    now_utc = datetime.now(
+        timezone.utc
+    )
 
     records: list[
         ForecastRecord
@@ -149,35 +170,65 @@ def get_forecast(
         ):
             continue
 
+        raw_timestamp = str(
+            timestamp_value
+        )
+
+        if raw_timestamp.endswith(
+            "Z"
+        ):
+            raw_timestamp = (
+                raw_timestamp[:-1]
+                + "+00:00"
+            )
+
         try:
             timestamp = (
                 datetime.fromisoformat(
-                    str(
-                        timestamp_value
-                    )
+                    raw_timestamp
                 )
             )
 
         except ValueError:
             continue
 
+        if timestamp.tzinfo is None:
+            timestamp = (
+                timestamp.replace(
+                    tzinfo=timezone.utc
+                )
+            )
+
+        # IMPORTANT:
+        # Never return current/past hour
+        # as a future forecast.
+        if timestamp <= now_utc:
+            continue
+
         records.append(
             ForecastRecord(
                 zone_id=zone_id,
-                timestamp=timestamp,
-                predicted_aqi=float(
-                    predicted_aqi
-                ),
-                risk_level=str(
-                    item.get(
-                        "risk_level",
-                        "UNKNOWN",
-                    )
-                ),
-                # Open-Meteo does not provide
-                # a confidence percentage.
+
+                timestamp=
+                    timestamp,
+
+                predicted_aqi=
+                    float(
+                        predicted_aqi
+                    ),
+
+                risk_level=
+                    str(
+                        item.get(
+                            "risk_level",
+                            "UNKNOWN",
+                        )
+                    ),
+
                 confidence=0.0,
             )
         )
 
-    return records
+    return records[
+        :hours
+    ]
