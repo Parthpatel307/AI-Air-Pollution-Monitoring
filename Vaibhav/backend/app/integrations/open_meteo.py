@@ -1,11 +1,15 @@
 """Open-Meteo environmental data integration."""
 
 from copy import deepcopy
+import logging
 from datetime import datetime, timedelta, timezone
 from time import monotonic
 from typing import Any
 
 import httpx
+
+
+logger = logging.getLogger(__name__)
 
 
 AIR_QUALITY_URL = (
@@ -812,22 +816,14 @@ def get_live_environment_data(
     longitude: float,
 ) -> dict[str, Any]:
     cache_key = (
-        round(
-            float(latitude),
-            5,
-        ),
-        round(
-            float(longitude),
-            5,
-        ),
+        round(float(latitude), 5),
+        round(float(longitude), 5),
     )
 
     now = monotonic()
 
-    cached = (
-        _SINGLE_LIVE_CACHE.get(
-            cache_key
-        )
+    cached = _SINGLE_LIVE_CACHE.get(
+        cache_key
     )
 
     if (
@@ -840,35 +836,42 @@ def get_live_environment_data(
             cached[1]
         )
 
-    air_quality = (
-        get_current_air_quality(
-            latitude=latitude,
-            longitude=longitude,
-        )
+    # AQI is the primary live dataset.
+    # Do not discard it if weather is rate-limited.
+    air_quality = get_current_air_quality(
+        latitude=latitude,
+        longitude=longitude,
     )
 
-    weather = (
-        get_current_weather(
+    weather: dict[str, Any] = {}
+    weather_stale = False
+
+    try:
+        weather = get_current_weather(
             latitude=latitude,
             longitude=longitude,
         )
-    )
+
+    except (
+        httpx.HTTPStatusError,
+        httpx.RequestError,
+    ) as exc:
+        weather_stale = True
+
+        logger.warning(
+            "Open-Meteo weather failed; "
+            "returning fresh AQI without fresh weather: %s: %s",
+            type(exc).__name__,
+            exc,
+        )
 
     result = {
-        "source":
-            "open_meteo",
-
-        "latitude":
-            latitude,
-
-        "longitude":
-            longitude,
-
-        "air_quality":
-            air_quality,
-
-        "weather":
-            weather,
+        "source": "open_meteo",
+        "latitude": latitude,
+        "longitude": longitude,
+        "air_quality": air_quality,
+        "weather": weather,
+        "weather_stale": weather_stale,
     }
 
     _SINGLE_LIVE_CACHE[
@@ -1005,59 +1008,58 @@ def get_bulk_environment_data(
     with httpx.Client(
         timeout=30.0
     ) as client:
-        air_response = (
-            client.get(
-                AIR_QUALITY_URL,
-                params={
-                    "latitude":
-                        latitudes,
-
-                    "longitude":
-                        longitudes,
-
-                    "current":
-                        air_variables,
-
-                    "timezone":
-                        "auto",
-                },
-            )
+        air_response = client.get(
+            AIR_QUALITY_URL,
+            params={
+                "latitude": latitudes,
+                "longitude": longitudes,
+                "current": air_variables,
+                "timezone": "auto",
+            },
         )
 
+        # AQI remains mandatory.
         air_response.raise_for_status()
 
-        weather_response = (
-            client.get(
-                WEATHER_URL,
-                params={
-                    "latitude":
-                        latitudes,
-
-                    "longitude":
-                        longitudes,
-
-                    "current":
-                        weather_variables,
-
-                    "timezone":
-                        "auto",
-                },
-            )
-        )
-
-        weather_response.raise_for_status()
-
-    air_results = (
-        _as_location_list(
+        air_results = _as_location_list(
             air_response.json()
         )
-    )
 
-    weather_results = (
-        _as_location_list(
-            weather_response.json()
-        )
-    )
+        # Weather is secondary.
+        # If rate-limited, still return fresh AQI.
+        weather_results: list[
+            dict[str, Any]
+        ] = []
+
+        try:
+            weather_response = client.get(
+                WEATHER_URL,
+                params={
+                    "latitude": latitudes,
+                    "longitude": longitudes,
+                    "current": weather_variables,
+                    "timezone": "auto",
+                },
+            )
+
+            weather_response.raise_for_status()
+
+            weather_results = (
+                _as_location_list(
+                    weather_response.json()
+                )
+            )
+
+        except (
+            httpx.HTTPStatusError,
+            httpx.RequestError,
+        ) as exc:
+            logger.warning(
+                "Open-Meteo bulk weather failed; "
+                "returning fresh AQI without fresh weather: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
 
     results: list[
         dict[str, Any]
