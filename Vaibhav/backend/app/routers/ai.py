@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import NamedTemporaryFile
 from datetime import datetime, timedelta, timezone
 import sys
+import time
 from typing import Any
 
 from fastapi import (
@@ -2043,13 +2044,40 @@ def ai_evidence_analyze(
 
 
     try:
-        result = integrations[
-            "evidence"
-        ](
-            str(
-                image_path
-            )
-        )
+        max_attempts = 4
+
+        for attempt in range(
+            1,
+            max_attempts + 1,
+        ):
+            try:
+                result = integrations[
+                    "evidence"
+                ](
+                    str(
+                        image_path
+                    )
+                )
+
+                break
+
+            except Exception as retry_exc:
+                if (
+                    not _is_temporary_ai_error(
+                        retry_exc
+                    )
+                    or attempt
+                    >= max_attempts
+                ):
+                    raise
+
+                delay_seconds = (
+                    2 ** attempt
+                )
+
+                time.sleep(
+                    delay_seconds
+                )
 
 
         if isinstance(
@@ -2082,6 +2110,27 @@ def ai_evidence_analyze(
 
 
     except Exception as exc:
+        if _is_temporary_ai_error(
+            exc
+        ):
+            raise HTTPException(
+                status_code=
+                    status.HTTP_503_SERVICE_UNAVAILABLE,
+
+                detail={
+                    "success": False,
+                    "error": {
+                        "code":
+                            "AI_TEMPORARILY_UNAVAILABLE",
+
+                        "message": (
+                            "Vision AI is temporarily busy. "
+                            "Please retry shortly."
+                        ),
+                    },
+                },
+            ) from exc
+
         raise HTTPException(
             status_code=500,
             detail={
