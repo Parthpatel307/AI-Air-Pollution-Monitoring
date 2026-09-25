@@ -12,3 +12,4 @@ joblib
 python-dotenv
 google-genai
 earthengine-api==1.7.45
+Pillow>=10.0.0

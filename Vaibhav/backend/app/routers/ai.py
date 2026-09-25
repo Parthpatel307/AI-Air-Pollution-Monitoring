@@ -1,6 +1,7 @@
 ﻿"""AI routes."""
 
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from datetime import datetime, timedelta, timezone
 import sys
 from typing import Any
@@ -1802,3 +1803,309 @@ def ai_forecast_explain(
             failure_code=
                 "FORECAST_EXPLANATION_FAILED",
         )
+
+# =========================================================
+# VISION EVIDENCE ANALYSIS
+# =========================================================
+
+
+@router.post(
+    "/evidence/analyze"
+)
+def ai_evidence_analyze(
+    payload: dict,
+
+    user: dict = Depends(
+        require_roles(
+            [
+                "AUTHORITY",
+                "ADMIN",
+            ]
+        )
+    ),
+) -> dict:
+    evidence_id = str(
+        payload.get(
+            "evidence_id",
+            ""
+        )
+        or ""
+    ).strip()
+
+    if not evidence_id:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "EVIDENCE_ID_REQUIRED",
+
+                    "message":
+                        "evidence_id is required.",
+                },
+            },
+        )
+
+
+    db = get_firestore()
+
+    evidence_document = (
+        db.collection(
+            "evidence"
+        )
+        .document(
+            evidence_id
+        )
+        .get()
+    )
+
+
+    if not evidence_document.exists:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "EVIDENCE_NOT_FOUND",
+
+                    "message": (
+                        f"Evidence '{evidence_id}' "
+                        "was not found."
+                    ),
+                },
+            },
+        )
+
+
+    evidence = (
+        evidence_document.to_dict()
+        or {}
+    )
+
+
+    content_type = str(
+        evidence.get(
+            "content_type",
+            ""
+        )
+        or ""
+    )
+
+
+    if not content_type.startswith(
+        "image/"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "IMAGE_EVIDENCE_REQUIRED",
+
+                    "message": (
+                        "AI vision analysis currently "
+                        "supports image evidence only."
+                    ),
+                },
+            },
+        )
+
+
+    temporary_path = None
+    image_path = None
+
+    file_bytes = evidence.get(
+        "file_bytes"
+    )
+
+
+    # -----------------------------------------------------
+    # NEW EVIDENCE:
+    # persistent image bytes stored in Firestore
+    # -----------------------------------------------------
+
+    if file_bytes:
+        try:
+            raw_bytes = bytes(
+                file_bytes
+            )
+
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code":
+                            "EVIDENCE_BYTES_INVALID",
+
+                        "message":
+                            "Stored evidence image data is invalid.",
+                    },
+                },
+            ) from exc
+
+
+        suffix = ".jpg"
+
+        if content_type == "image/png":
+            suffix = ".png"
+
+        elif content_type == "image/webp":
+            suffix = ".webp"
+
+
+        with NamedTemporaryFile(
+            delete=False,
+            suffix=suffix,
+        ) as temporary_file:
+            temporary_file.write(
+                raw_bytes
+            )
+
+            temporary_path = Path(
+                temporary_file.name
+            )
+
+
+        image_path = temporary_path
+
+
+    # -----------------------------------------------------
+    # OLD EVIDENCE:
+    # previous local Render/private_uploads path
+    # -----------------------------------------------------
+
+    else:
+        storage_path = evidence.get(
+            "storage_path"
+        )
+
+        if not storage_path:
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code":
+                            "EVIDENCE_FILE_NOT_FOUND",
+
+                        "message":
+                            "Evidence image data is unavailable.",
+                    },
+                },
+            )
+
+
+        image_path = Path(
+            str(storage_path)
+        )
+
+
+        if not image_path.is_absolute():
+            backend_root = (
+                Path(__file__)
+                .resolve()
+                .parents[2]
+            )
+
+            image_path = (
+                backend_root
+                / image_path
+            )
+
+
+        if not image_path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "success": False,
+                    "error": {
+                        "code":
+                            "EVIDENCE_FILE_MISSING",
+
+                        "message": (
+                            "This older evidence record exists, "
+                            "but its uploaded image is no longer "
+                            "available. Please upload new evidence."
+                        ),
+                    },
+                },
+            )
+
+
+    integrations = (
+        _load_parth_integrations()
+    )
+
+
+    try:
+        result = integrations[
+            "evidence"
+        ](
+            str(
+                image_path
+            )
+        )
+
+
+        if isinstance(
+            result,
+            dict,
+        ):
+            result = dict(
+                result
+            )
+
+            result.setdefault(
+                "evidence_id",
+                evidence_id,
+            )
+
+            result.setdefault(
+                "storage_backend",
+                evidence.get(
+                    "storage_backend",
+                    "local",
+                ),
+            )
+
+
+        return result
+
+
+    except HTTPException:
+        raise
+
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "error": {
+                    "code":
+                        "EVIDENCE_ANALYSIS_FAILED",
+
+                    "message":
+                        str(exc),
+                },
+            },
+        ) from exc
+
+
+    finally:
+        if (
+            temporary_path
+            is not None
+        ):
+            try:
+                temporary_path.unlink(
+                    missing_ok=True
+                )
+
+            except Exception:
+                pass
